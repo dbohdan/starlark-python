@@ -104,7 +104,7 @@ class Thread:
     Predeclared and universal envs are read-only dicts (host-supplied).
     """
 
-    __slots__ = ("active", "frames", "locs", "module", "predeclared", "universal")
+    __slots__ = ("active", "frames", "loader", "locs", "module", "predeclared", "universal")
 
     def __init__(
         self,
@@ -112,6 +112,7 @@ class Thread:
         predeclared: dict[str, Any] | None = None,
         universal: dict[str, Any] | None = None,
         locs: FileLocations | None = None,
+        loader=None,
     ) -> None:
         self.module = module
         self.predeclared = predeclared or {}
@@ -121,6 +122,8 @@ class Thread:
         # Set of `id(StarlarkFunction)` currently executing — used to reject
         # recursion (Starlark spec: recursion is forbidden).
         self.active: set[int] = set()
+        # Optional `Callable[[str], Module]` for resolving load() statements.
+        self.loader = loader
 
 
 # ---------------------------------------------------------------- entry
@@ -185,8 +188,12 @@ def _exec_stmt(stmt, frame: Frame, thread: Thread) -> None:
         # PASS: no-op
         return
     if isinstance(stmt, ast.LoadStatement):
-        # Phase 11 will implement load() proper. For now, error if used.
-        raise EvalError("load() statement is not yet implemented")
+        from .loader import perform_load
+        bindings = [(b.local.name, b.original.name) for b in stmt.bindings]
+        results = perform_load(thread.loader, stmt.module.value, bindings)
+        for k, v in results.items():
+            thread.module.globals[k] = v
+        return
     raise AssertionError(f"unhandled statement {type(stmt).__name__}")
 
 
@@ -492,10 +499,10 @@ def _multiply(a: Any, b: Any) -> Any:
     if _is_num(a) and _is_num(b):
         return a * b
     if _is_int(a) and isinstance(b, str):
-        _check_repeat(max(0, a), len(b))
+        _check_repeat(max(0, a), len(b), unit="characters")
         return b * max(0, a)
     if isinstance(a, str) and _is_int(b):
-        _check_repeat(max(0, b), len(a))
+        _check_repeat(max(0, b), len(a), unit="characters")
         return a * max(0, b)
     if _is_int(a) and isinstance(b, tuple):
         _check_repeat(max(0, a), len(b))
@@ -512,16 +519,14 @@ def _multiply(a: Any, b: Any) -> Any:
     raise EvalError(f"unsupported binary operation: {starlark_type(a)} * {starlark_type(b)}")
 
 
-def _check_repeat(factor: int, length: int) -> None:
+def _check_repeat(factor: int, length: int, *, unit: str = "elements") -> None:
     n = factor * length
     if n > _MAX_REPEAT:
-        # Match Java reference: if factor itself is out of signed-32-bit range,
-        # complain about that; otherwise complain about the product.
         if factor >= (1 << 31):
             raise EvalError(
                 f"got {factor} for repeat, want value in signed 32-bit range"
             )
-        raise EvalError(f"excessive repeat ({length} * {factor} elements)")
+        raise EvalError(f"excessive repeat ({length} * {factor} {unit})")
 
 
 def _div(a: Any, b: Any) -> Any:
@@ -820,7 +825,7 @@ def call(
         finally:
             thread.active.discard(id(fn))
             thread.frames.pop()
-    raise EvalError(f"{starlark_type(fn)} object is not callable")
+    raise EvalError(f"'{starlark_type(fn)}' object is not callable")
 
 
 def _pos(offset: int, thread: Thread) -> Position | None:

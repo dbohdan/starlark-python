@@ -374,6 +374,13 @@ def b_any(x: Any) -> bool:
     return False
 
 
+def b_sum(x: Any, start: Any = 0) -> Any:
+    total = start
+    for v in _to_iter(x):
+        total = total + v
+    return total
+
+
 # ---------------------------------------------------------------- attr / dir
 
 
@@ -456,6 +463,7 @@ def make_universal() -> dict[str, Any]:
         ("max", b_max),
         ("all", b_all),
         ("any", b_any),
+        ("sum", b_sum),
         ("hasattr", b_hasattr),
         ("getattr", b_getattr),
         ("dir", b_dir),

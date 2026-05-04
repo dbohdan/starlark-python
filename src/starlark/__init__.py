@@ -53,11 +53,14 @@ def exec_file(
     *,
     predeclared: dict[str, Any] | None = None,
     universal: dict[str, Any] | None = None,
+    loader=None,
 ) -> Module:
     """Parse, resolve, and execute `source` as a Starlark file.
 
-    Returns the populated `Module`. Raises `SyntaxError` for parse/resolve
-    errors and `EvalError` for runtime errors.
+    Returns the populated `Module`. `loader` is an optional callable mapping
+    a module path string (passed to `load(...)`) to a `Module`. Raises
+    `StarlarkSyntaxException` for parse/resolve errors and `EvalError` for
+    runtime errors.
     """
     file = parse(source, file=filename)
     locs = Lexer(source, file=filename).locs
@@ -74,7 +77,9 @@ def exec_file(
     if file.errors:
         raise StarlarkSyntaxException(file.errors)
     module = Module(filename)
-    thread = Thread(module=module, predeclared=pre, universal=uni, locs=locs)
+    thread = Thread(
+        module=module, predeclared=pre, universal=uni, locs=locs, loader=loader
+    )
     from .eval.builtins import with_mutability, with_thread
     with with_mutability(module.mutability), with_thread(thread):
         eval_file(file, thread)

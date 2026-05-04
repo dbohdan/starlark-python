@@ -2,6 +2,47 @@
 
 A journal. Append-only. Newest entries at the top.
 
+## 2026-05-04 — Phases 11, 12, 14 (load, packaging, polish)
+
+What landed:
+
+- **Phase 11 — `load()` statement.** `eval/loader.py` defines a `Loader`
+  protocol (just `Callable[[str], Module]`) plus a `FileLoader` helper for
+  the common case of loading from disk. `Thread.loader` carries it; the
+  evaluator's `LoadStatement` handler injects the resolved bindings into the
+  module's globals. 4 unit tests including a chained two-level load.
+- **Phase 12 — assert.star module.** Placeholder per the original notes.
+  The conformance suite uses predeclared `assert_eq`/etc. directly (Bazel
+  ScriptTest style), which we ship via `eval/test_driver.py`. The
+  starlark-go-style `load("assert.star", "asserts")` form is unused; if a
+  future test file needs it, add `conformance/assert.star`.
+- **Phase 14 — README, zipapp, CLI, cross-validation.**
+  - `src/starlark/cmd.py` + `__main__.py`: `python -m starlark` or
+    `starlark` console script. Supports `-c EXPR`, a script path, and a
+    minimal REPL.
+  - `Makefile` with `test`, `lint`, `fmt`, `zipapp`, `clean` targets.
+    `make zipapp` produces a 560 KB self-contained `./starlark.pyz`.
+  - `tests/test_cross_validation.py`: when the `starlark` binary from
+    go.starlark.net is on PATH (and is *not* our own venv shim), runs each
+    of three known-good conformance files under both implementations and
+    asserts matching exit status. Skips cleanly when the binary is absent.
+
+Final tally: **26 of 38 conformance files passing (68%)**. 369 total tests,
+all passing or xfail. 12 conformance files remain xfail; nearly all are
+error-message mismatches with the Java reference (e.g. its 32-bit
+range/repeat checks, struct field-type tracking for `mutablestruct`,
+nan-placement details for `sorted`). One file (`json.star`) is genuinely
+unimplemented (json.encode / json.decode); listed in `SKIP_FILES`.
+
+What's next: nothing required by the original brief. Possible follow-ups:
+
+- Implement json.encode / json.decode → unlocks `json.star` and parts of
+  `set.star`.
+- Match the Java reference's exact error wording on the remaining xfails;
+  this is mostly mechanical but tedious.
+- Add a `tests/test_repl.py` that exercises the interactive REPL via
+  `subprocess.Popen`.
+
 ## 2026-05-04 — Phases 1-13 (most of conformance suite passing)
 
 Big push. All phases through 13 implemented; conformance dashboard at

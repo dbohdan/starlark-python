@@ -34,12 +34,12 @@ STAR_FILES = sorted(CONFORMANCE_DIR.glob("*.star"))
 # Files that exercise features we haven't implemented yet. Trim as we go.
 XFAIL_FILES: dict[str, str] = {
     "set.star": "set spec corners",
+    "fields.star": "mutablestruct field type-tracking on reassignment",
     "string_format.star": "advanced %-formatting",
     "string_misc.star": "various string edge cases",
     "float.star": "float repr / nan / inf edge cases",
     "int.star": "int.bit_length and similar methods",
     "int_constructor.star": "int(string) edge cases",
-    "fields.star": "struct.fields()",
     "function.star": "lambda kwargs / edge cases",
     "loop.star": "complex loop semantics",
     "range.star": "range edge cases",

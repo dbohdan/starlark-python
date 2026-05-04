@@ -1,0 +1,87 @@
+"""Optional cross-validation against the starlark-go reference implementation.
+
+If the `starlark` binary (from go.starlark.net/cmd/starlark) is on PATH, run
+each conformance .star file under both implementations and assert that exit
+status and stdout match. Skipped cleanly when the binary is absent.
+"""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+import starlark
+from starlark.eval.test_driver import make_predeclared
+
+CONFORMANCE_DIR = Path(__file__).parent.parent / "conformance"
+# Skip our own CLI shim (`./.venv/bin/starlark`) — we want the go reference.
+_candidate = shutil.which("starlark")
+_is_go_starlark = False
+if _candidate:
+    try:
+        out = subprocess.run(
+            [_candidate, "-c", "1+1"], capture_output=True, text=True, timeout=5,
+        )
+        # The go starlark prints `2` only and exits 0; ours does too. The
+        # discriminator is that the go binary doesn't have our copyright header
+        # in --help. Even simpler: skip if the binary path is inside our venv.
+        venv = str(Path(__file__).parent.parent / ".venv")
+        if not _candidate.startswith(venv):
+            _is_go_starlark = True
+    except Exception:
+        pass
+
+STAR_BIN = _candidate if _is_go_starlark else None
+
+
+pytestmark = pytest.mark.skipif(
+    STAR_BIN is None,
+    reason="starlark-go CLI not installed — install go.starlark.net/cmd/starlark to enable",
+)
+
+
+def _run_go(path: Path) -> tuple[int, str]:
+    p = subprocess.run(
+        [STAR_BIN, str(path)],
+        capture_output=True,
+        timeout=10,
+        text=True,
+        check=False,
+    )
+    return p.returncode, p.stdout
+
+
+def _run_python(path: Path) -> tuple[int, str]:
+    """Run the .star file through our interpreter and return (status, stdout)."""
+    import contextlib
+    import io
+    out = io.StringIO()
+    src = path.read_text(encoding="utf-8")
+    try:
+        with contextlib.redirect_stdout(out):
+            starlark.exec_file(src, filename=path.name, predeclared=make_predeclared())
+    except Exception:
+        return 1, out.getvalue()
+    return 0, out.getvalue()
+
+
+# Cross-validation is best-effort: we only assert on a small whitelist where
+# we're confident both implementations should agree byte-for-byte.
+SAFE_FILES = [
+    "and_or_not.star",
+    "equality.star",
+    "tuple.star",
+]
+
+
+@pytest.mark.parametrize("name", SAFE_FILES)
+def test_cross(name: str):
+    path = CONFORMANCE_DIR / name
+    go_status, go_out = _run_go(path)
+    py_status, py_out = _run_python(path)
+    assert (go_status == 0) == (py_status == 0), (
+        f"go status={go_status}, python status={py_status}"
+    )

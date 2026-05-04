@@ -12,6 +12,7 @@ from typing import Any
 from .errors import EvalError
 from .methods import register_string_method
 from .values import StarlarkList
+from .values import starlark_type as _st
 
 
 def _resolve_indices(s: str, start, end) -> tuple[int, int]:
@@ -38,9 +39,16 @@ def s_startswith(s: str, prefix: Any, start: Any = None, end: Any = None) -> boo
     a, b = _resolve_indices(s, start, end)
     sub = s[a:b]
     if isinstance(prefix, tuple):
-        return any(isinstance(p, str) and sub.startswith(p) for p in prefix)
+        for i, p in enumerate(prefix):
+            if not isinstance(p, str):
+                raise EvalError(
+                    f"at index {i} of sub, got element of type {_st(p)}, want string"
+                )
+        return any(sub.startswith(p) for p in prefix)
     if not isinstance(prefix, str):
-        raise EvalError("startswith() requires a string or tuple of strings")
+        raise EvalError(
+            f"got value of type '{_st(prefix)}', want 'string or tuple'"
+        )
     return sub.startswith(prefix)
 
 
@@ -48,9 +56,16 @@ def s_endswith(s: str, suffix: Any, start: Any = None, end: Any = None) -> bool:
     a, b = _resolve_indices(s, start, end)
     sub = s[a:b]
     if isinstance(suffix, tuple):
-        return any(isinstance(p, str) and sub.endswith(p) for p in suffix)
+        for i, p in enumerate(suffix):
+            if not isinstance(p, str):
+                raise EvalError(
+                    f"at index {i} of sub, got element of type {_st(p)}, want string"
+                )
+        return any(sub.endswith(p) for p in suffix)
     if not isinstance(suffix, str):
-        raise EvalError("endswith() requires a string or tuple of strings")
+        raise EvalError(
+            f"got value of type '{_st(suffix)}', want 'string or tuple'"
+        )
     return sub.endswith(suffix)
 
 
@@ -76,14 +91,14 @@ def s_rfind(s: str, sub: str, start: Any = None, end: Any = None) -> int:
 def s_index(s: str, sub: str, start: Any = None, end: Any = None) -> int:
     idx = s_find(s, sub, start, end)
     if idx < 0:
-        raise EvalError(f"substring {sub!r} not found in {s!r}")
+        raise EvalError("substring not found")
     return idx
 
 
 def s_rindex(s: str, sub: str, start: Any = None, end: Any = None) -> int:
     idx = s_rfind(s, sub, start, end)
     if idx < 0:
-        raise EvalError(f"substring {sub!r} not found in {s!r}")
+        raise EvalError("substring not found")
     return idx
 
 
