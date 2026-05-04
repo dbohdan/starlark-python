@@ -139,6 +139,14 @@ class StarlarkList:
 
     def extend(self, items) -> None:
         self.mutability.check("list")
+        # Cheap pre-check for known-size iterables to avoid OOM on hostile input.
+        try:
+            n = len(items)
+        except TypeError:
+            n = 0
+        if n > (1 << 24):
+            from .errors import EvalError as _E
+            raise _E(f"excessive capacity requested: {n} elements")
         for x in items:
             self._data.append(x)
 
@@ -163,9 +171,14 @@ class StarlarkList:
         self._data.clear()
 
     def index_of(self, value: Any, start: int = 0, end: int | None = None) -> int:
+        n = len(self._data)
         if end is None:
-            end = len(self._data)
-        for i in range(start, min(end, len(self._data))):
+            end = n
+        if start < 0:
+            start = max(0, n + start)
+        if end < 0:
+            end = max(0, n + end)
+        for i in range(start, min(end, n)):
             if equal(self._data[i], value):
                 return i
         raise EvalError(f"item {repr_starlark(value)!s} not found in list")
@@ -385,7 +398,7 @@ class Range:
 
     def __post_init__(self):
         if self.step == 0:
-            raise EvalError("range() step argument must not be zero")
+            raise EvalError("step cannot be 0")
 
     def __len__(self) -> int:
         if self.step > 0:
@@ -563,7 +576,9 @@ def repr_starlark(value: Any) -> str:
             return f"range({value.start}, {value.stop})"
         return f"range({value.start}, {value.stop}, {value.step})"
     if isinstance(value, BuiltinFunction):
-        return f"<built-in function {value.name}>"
+        return f"<built-in function {value.name}>" if not value.self_repr else (
+            f"<built-in method {value.name.split('.')[-1]} of {value.self_repr} value>"
+        )
     # User-defined functions — let their __repr__ handle it.
     return repr(value)
 

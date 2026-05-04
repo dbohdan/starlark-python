@@ -85,21 +85,38 @@ def b_assert_fails(fn: Any, want_error: Any) -> None:
 # ---------------------------------------------------------------- struct
 
 
-@dataclass
 class Struct:
-    """A simple immutable record. `s.x` returns the field x."""
+    """A simple record. `s.x` returns the field x. Field access goes via the
+    evaluator's `_attr_get`, which special-cases anything with a `fields` dict.
+    """
 
-    fields: dict
-    _frozen: bool = True
+    __slots__ = ("_frozen", "fields")
 
     _starlark_type = "struct"
 
-    def __getattr__(self, name: str) -> Any:
-        if name.startswith("_") or name == "fields":
-            raise AttributeError(name)
-        if name in self.fields:
-            return self.fields[name]
-        raise EvalError(f"struct has no field {name!r}")
+    def __init__(self, fields: dict, frozen: bool = True) -> None:
+        self.fields = fields
+        self._frozen = frozen
+
+    def __repr__(self) -> str:
+        body = ", ".join(
+            f"{k} = {repr_starlark(v)}" for k, v in self.fields.items()
+        )
+        return f"struct({body})"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Struct):
+            return NotImplemented
+        if list(self.fields.keys()) != list(other.fields.keys()):
+            return False
+        for k, v in self.fields.items():
+            if not equal(v, other.fields[k]):
+                return False
+        return True
+
+    def __ne__(self, other: object) -> bool:
+        eq = self.__eq__(other)
+        return NotImplemented if eq is NotImplemented else not eq
 
 
 def b_struct(**kwargs) -> Struct:

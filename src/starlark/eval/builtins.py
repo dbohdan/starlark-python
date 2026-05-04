@@ -84,13 +84,11 @@ def _is_int(v: Any) -> bool:
 
 
 def _to_iter(v: Any):
-    if v is None:
-        raise EvalError("None is not iterable")
     if isinstance(v, str):
         return iter(v)
     if isinstance(v, (tuple, StarlarkList, Dict, StarlarkSet, Range)):
         return iter(v)
-    raise EvalError(f"{starlark_type(v)} value is not iterable")
+    raise EvalError(f"got value of type '{starlark_type(v)}', want 'iterable'")
 
 
 # ---------------------------------------------------------------- type / len
@@ -360,21 +358,31 @@ def b_any(x: Any) -> bool:
 
 def b_hasattr(obj: Any, name: Any) -> bool:
     if not isinstance(name, str):
-        raise EvalError("hasattr() requires string attribute name")
+        raise EvalError(
+            f"parameter 'name' got value of type '{starlark_type(name)}', want 'string'"
+        )
+    fields = getattr(obj, "fields", None)
+    if isinstance(fields, dict) and name in fields:
+        return True
     from .methods import get_method
     return get_method(obj, name) is not None
 
 
 def b_getattr(obj: Any, name: Any, *defaults) -> Any:
     if not isinstance(name, str):
-        raise EvalError("getattr() requires string attribute name")
+        raise EvalError(
+            f"parameter 'name' got value of type '{starlark_type(name)}', want 'string'"
+        )
+    fields = getattr(obj, "fields", None)
+    if isinstance(fields, dict) and name in fields:
+        return fields[name]
     from .methods import get_method
     m = get_method(obj, name)
     if m is not None:
         return m
     if defaults:
         return defaults[0]
-    raise EvalError(f"{starlark_type(obj)!r} value has no field or method {name!r}")
+    raise EvalError(f"'{starlark_type(obj)}' value has no field or method '{name}'")
 
 
 def b_dir(obj: Any) -> StarlarkList:
@@ -388,6 +396,9 @@ def b_dir(obj: Any) -> StarlarkList:
         names = sorted(_DICT_METHODS.keys())
     elif isinstance(obj, StarlarkSet):
         names = sorted(_SET_METHODS.keys())
+    fields = getattr(obj, "fields", None)
+    if isinstance(fields, dict):
+        names = sorted(set(names) | set(fields.keys()))
     return StarlarkList(names, _mut())
 
 

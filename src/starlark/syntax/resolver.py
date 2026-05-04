@@ -532,7 +532,10 @@ class Resolver:
     def _resolve_comprehension(self, expr: Comprehension) -> None:
         # Per Python/Starlark, the iterable of the FIRST `for` clause is
         # evaluated in the enclosing scope. Subsequent clauses run in the
-        # comprehension's own scope.
+        # comprehension's own scope. Importantly, *every* comprehension-bound
+        # name is statically local to the comprehension, even if a later
+        # clause's iterable references it before its for-clause runs (that's
+        # a `referenced before assignment` runtime error).
         if not expr.clauses or not isinstance(expr.clauses[0], ComprehensionClauseFor):
             return  # Parser already rejected; no-op.
 
@@ -540,14 +543,18 @@ class Resolver:
         self._resolve_expr(first.iterable)
 
         comp_block = _Block("comprehension", self._current_block())
+        # Pre-declare all for-clause loop vars so name resolution within the
+        # comprehension always classifies them as LOCAL.
+        for clause in expr.clauses:
+            if isinstance(clause, ComprehensionClauseFor):
+                self._collect_assign_names(clause.vars, into=comp_block.locals_)
+
         self._blocks.append(comp_block)
         try:
-            self._declare_assign_targets(first.vars)
             self._resolve_assign_target(first.vars)
             for clause in expr.clauses[1:]:
                 if isinstance(clause, ComprehensionClauseFor):
                     self._resolve_expr(clause.iterable)
-                    self._declare_assign_targets(clause.vars)
                     self._resolve_assign_target(clause.vars)
                 else:
                     self._resolve_expr(clause.cond)

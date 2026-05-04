@@ -27,8 +27,10 @@ def l_append(self: StarlarkList, value: Any) -> None:
 
 
 def l_extend(self: StarlarkList, items: Any) -> None:
-    if isinstance(items, str) or not hasattr(items, "__iter__"):
-        raise EvalError(f"extend() requires an iterable, not {starlark_type(items)}")
+    if not hasattr(items, "__iter__"):
+        raise EvalError(
+            f"parameter 'items' got value of type '{starlark_type(items)}', want 'iterable'"
+        )
     self.extend(items)
 
 
@@ -41,8 +43,14 @@ def l_insert(self: StarlarkList, index: int, value: Any) -> None:
 def l_pop(self: StarlarkList, index: Any = -1) -> Any:
     if not _is_int(index):
         raise EvalError("pop() index must be int")
-    if len(self) == 0:
+    n = len(self)
+    if n == 0:
         raise EvalError("pop from empty list")
+    i = index + n if index < 0 else index
+    if i < 0 or i >= n:
+        raise EvalError(
+            f"index out of range (index is {index}, but sequence has {n} elements)"
+        )
     return self.pop(index)
 
 

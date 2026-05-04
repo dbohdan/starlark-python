@@ -247,14 +247,15 @@ def test_closure():
     assert m.globals["v"] == 42
 
 
-def test_recursion():
-    m = run(
-        "def fact(n):\n"
-        "    if n <= 1: return 1\n"
-        "    return n * fact(n - 1)\n"
-        "z = fact(5)\n"
-    )
-    assert m.globals["z"] == 120
+def test_recursion_forbidden():
+    # Per the Starlark spec, recursion is not allowed.
+    with pytest.raises(EvalError, match="called recursively"):
+        run(
+            "def fact(n):\n"
+            "    if n <= 1: return 1\n"
+            "    return n * fact(n - 1)\n"
+            "z = fact(5)\n"
+        )
 
 
 # ----------------------------------------------------------- comprehensions

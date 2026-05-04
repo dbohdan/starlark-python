@@ -43,6 +43,20 @@ from .values import (
 # Sentinel for "local declared but not assigned yet".
 _UNBOUND = object()
 
+# Soft limit on container allocations to avoid hangs / OOMs on hostile input.
+# The Java reference uses a similar cap.
+_MAX_REPEAT = 1 << 24  # 16M elements
+
+
+def _check_repeat_size(n: int) -> int:
+    if n > _MAX_REPEAT:
+        raise EvalError(
+            f"got {n} for repeat, want value in signed 32-bit range"
+            if n >= (1 << 31)
+            else f"excessive repeat ({n} elements)"
+        )
+    return n
+
 
 # ---------------------------------------------------------------- signals
 
@@ -90,7 +104,7 @@ class Thread:
     Predeclared and universal envs are read-only dicts (host-supplied).
     """
 
-    __slots__ = ("frames", "locs", "module", "predeclared", "universal")
+    __slots__ = ("active", "frames", "locs", "module", "predeclared", "universal")
 
     def __init__(
         self,
@@ -104,6 +118,9 @@ class Thread:
         self.universal = universal or {}
         self.frames: list[Frame] = []
         self.locs = locs
+        # Set of `id(StarlarkFunction)` currently executing — used to reject
+        # recursion (Starlark spec: recursion is forbidden).
+        self.active: set[int] = set()
 
 
 # ---------------------------------------------------------------- entry
@@ -313,7 +330,7 @@ def _read_name(ident: ast.Identifier, frame: Frame, thread: Thread) -> Any:
         if scope == Scope.LOCAL:
             v = frame.locals_.get(name, _UNBOUND)
             if v is _UNBOUND:
-                raise EvalError(f"local variable {name!r} referenced before assignment")
+                raise EvalError(f"local variable {name!r} is referenced before assignment")
             return v
         if scope == Scope.FREE:
             # Look in the closure dict.
@@ -475,18 +492,36 @@ def _multiply(a: Any, b: Any) -> Any:
     if _is_num(a) and _is_num(b):
         return a * b
     if _is_int(a) and isinstance(b, str):
+        _check_repeat(max(0, a), len(b))
         return b * max(0, a)
     if isinstance(a, str) and _is_int(b):
+        _check_repeat(max(0, b), len(a))
         return a * max(0, b)
     if _is_int(a) and isinstance(b, tuple):
+        _check_repeat(max(0, a), len(b))
         return b * max(0, a)
     if isinstance(a, tuple) and _is_int(b):
+        _check_repeat(max(0, b), len(a))
         return a * max(0, b)
     if _is_int(a) and isinstance(b, StarlarkList):
+        _check_repeat(max(0, a), len(b))
         return StarlarkList(list(b) * max(0, a), b.mutability)
     if isinstance(a, StarlarkList) and _is_int(b):
+        _check_repeat(max(0, b), len(a))
         return StarlarkList(list(a) * max(0, b), a.mutability)
     raise EvalError(f"unsupported binary operation: {starlark_type(a)} * {starlark_type(b)}")
+
+
+def _check_repeat(factor: int, length: int) -> None:
+    n = factor * length
+    if n > _MAX_REPEAT:
+        # Match Java reference: if factor itself is out of signed-32-bit range,
+        # complain about that; otherwise complain about the product.
+        if factor >= (1 << 31):
+            raise EvalError(
+                f"got {factor} for repeat, want value in signed 32-bit range"
+            )
+        raise EvalError(f"excessive repeat ({length} * {factor} elements)")
 
 
 def _div(a: Any, b: Any) -> Any:
@@ -525,6 +560,14 @@ def _bitwise(op: TokenKind, a: Any, b: Any) -> Any:
             return a | b
         if op == TokenKind.CARET:
             return a ^ b
+    if isinstance(a, Dict) and isinstance(b, Dict) and op == TokenKind.PIPE:
+        # dict | dict: right-biased merge, like Python 3.9+.
+        out = Dict(mutability=a.mutability)
+        for k, v in a.items():
+            out[k] = v
+        for k, v in b.items():
+            out[k] = v
+        return out
     if isinstance(a, StarlarkSet) and isinstance(b, StarlarkSet):
         if op == TokenKind.AMPERSAND:
             return _set_op(a, b, lambda x, y: x in y)
@@ -593,19 +636,23 @@ def _contains(container: Any, item: Any) -> bool:
 def _index_get(obj: Any, idx: Any) -> Any:
     if isinstance(obj, str):
         if not _is_int(idx):
-            raise EvalError(f"string index must be int, got {starlark_type(idx)}")
+            raise EvalError(f"got {starlark_type(idx)} for string index, want int")
         n = len(obj)
         i = idx + n if idx < 0 else idx
         if i < 0 or i >= n:
-            raise EvalError(f"index out of range (index={idx}, size={n})")
+            raise EvalError(
+                f"index out of range (index is {idx}, but sequence has {n} elements)"
+            )
         return obj[i]
     if isinstance(obj, (StarlarkList, tuple)):
         if not _is_int(idx):
-            raise EvalError(f"sequence index must be int, got {starlark_type(idx)}")
+            raise EvalError(f"got {starlark_type(idx)} for sequence index, want int")
         n = len(obj)
         i = idx + n if idx < 0 else idx
         if i < 0 or i >= n:
-            raise EvalError(f"index out of range (index={idx}, size={n})")
+            raise EvalError(
+                f"index out of range (index is {idx}, but sequence has {n} elements)"
+            )
         return obj[i]
     if isinstance(obj, Dict):
         return obj[idx]
@@ -623,7 +670,9 @@ def _index_set(obj: Any, idx: Any, value: Any) -> None:
         n = len(obj)
         i = idx + n if idx < 0 else idx
         if i < 0 or i >= n:
-            raise EvalError(f"index out of range (index={idx}, size={n})")
+            raise EvalError(
+                f"index out of range (index is {idx}, but sequence has {n} elements)"
+            )
         obj[i] = value
         return
     if isinstance(obj, Dict):
@@ -636,8 +685,15 @@ def _index_set(obj: Any, idx: Any, value: Any) -> None:
 def _slice(obj: Any, start, end, step, mutability: Mutability) -> Any:
     if step is None:
         step = 1
-    if not _is_int(step) or step == 0:
-        raise EvalError("slice step must be a non-zero int")
+    if not _is_int(step):
+        raise EvalError(f"slice step must be int, got {starlark_type(step)}")
+    if step == 0:
+        raise EvalError("slice step cannot be zero")
+    for label, val in (("start", start), ("stop", end)):
+        if val is not None and not _is_int(val):
+            raise EvalError(
+                f"got {starlark_type(val)} for {label} index, want int"
+            )
     if isinstance(obj, str):
         return obj[_py_slice(start, end, step)]
     if isinstance(obj, tuple):
@@ -665,13 +721,14 @@ def _slice_indices(n: int, start, end, step):
 
 
 def _attr_get(obj: Any, name: str) -> Any:
-    # The MethodLibrary lookup happens at the value level. Phase 8/9 wires
-    # in string/list/dict methods. For now, dispatch to a generic getter
-    # imported lazily.
+    # Structs (from the test driver) expose their fields via `.`.
+    fields = getattr(obj, "fields", None)
+    if isinstance(fields, dict) and name in fields:
+        return fields[name]
     from . import methods
     method = methods.get_method(obj, name)
     if method is None:
-        raise EvalError(f"{starlark_type(obj)} has no field or method {name!r}")
+        raise EvalError(f"'{starlark_type(obj)}' value has no field or method '{name}'")
     return method
 
 
@@ -725,6 +782,8 @@ def call(
         except TypeError as e:
             raise EvalError(str(e)) from None
     if isinstance(fn, StarlarkFunction):
+        if id(fn) in thread.active:
+            raise EvalError(f"function '{fn.name}' called recursively")
         locals_ = bind_arguments(fn, positional, keyword)
         # Pull in free variables from closure.
         for name in fn.freevars:
@@ -739,6 +798,7 @@ def call(
             position=position,
         )
         thread.frames.append(new_frame)
+        thread.active.add(id(fn))
         try:
             if fn.body_expr is not None:
                 return _eval_expr(fn.body_expr, new_frame, thread)
@@ -752,6 +812,7 @@ def call(
             e.push_frame(fn.name, position)
             raise
         finally:
+            thread.active.discard(id(fn))
             thread.frames.pop()
     raise EvalError(f"{starlark_type(fn)} object is not callable")
 
@@ -876,16 +937,15 @@ def _eval_clauses(
 
 
 def _iterate(value: Any):
-    if value is None:
-        raise EvalError("None is not iterable")
     if isinstance(value, str):
-        # Iterating a string yields its characters (code points).
         return iter(value)
     if isinstance(value, (tuple, list, StarlarkList, Dict, StarlarkSet, Range)):
         return iter(value)
     if isinstance(value, dict):
         return iter(value)
-    raise EvalError(f"{starlark_type(value)} value is not iterable")
+    raise EvalError(
+        f"got value of type '{starlark_type(value)}', want 'iterable'"
+    )
 
 
 def _str_format(template: str, arg: Any) -> str:

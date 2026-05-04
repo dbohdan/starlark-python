@@ -153,12 +153,22 @@ def s_rstrip(s: str, chars: Any = None) -> str:
 
 def s_split(s: str, sep: Any = None, maxsplit: Any = None) -> StarlarkList:
     from .builtins import _mut
+    if sep is not None:
+        if not isinstance(sep, str):
+            raise EvalError(f"got value of type '{type(sep).__name__}', want 'string or None'")
+        if not sep:
+            raise EvalError("Empty separator")
     parts = s.split(sep, -1 if maxsplit is None else maxsplit)
     return StarlarkList(parts, _mut())
 
 
 def s_rsplit(s: str, sep: Any = None, maxsplit: Any = None) -> StarlarkList:
     from .builtins import _mut
+    if sep is not None:
+        if not isinstance(sep, str):
+            raise EvalError(f"got value of type '{type(sep).__name__}', want 'string or None'")
+        if not sep:
+            raise EvalError("Empty separator")
     parts = s.rsplit(sep, -1 if maxsplit is None else maxsplit)
     return StarlarkList(parts, _mut())
 
@@ -169,14 +179,22 @@ def s_splitlines(s: str, keepends: bool = False) -> StarlarkList:
 
 
 def s_partition(s: str, sep: str) -> tuple:
-    if not isinstance(sep, str) or not sep:
-        raise EvalError("partition() requires a non-empty string")
+    if not isinstance(sep, str):
+        raise EvalError(
+            f"got value of type '{type(sep).__name__}', want 'string'"
+        )
+    if not sep:
+        raise EvalError("empty separator")
     return s.partition(sep)
 
 
 def s_rpartition(s: str, sep: str) -> tuple:
-    if not isinstance(sep, str) or not sep:
-        raise EvalError("rpartition() requires a non-empty string")
+    if not isinstance(sep, str):
+        raise EvalError(
+            f"got value of type '{type(sep).__name__}', want 'string'"
+        )
+    if not sep:
+        raise EvalError("empty separator")
     return s.rpartition(sep)
 
 
