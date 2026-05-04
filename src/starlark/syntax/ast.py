@@ -56,6 +56,8 @@ class StringLiteral(Expression):
 @dataclass(slots=True)
 class Identifier(Expression):
     name: str
+    # Set by the Resolver. None means "not resolved" (e.g., parser-only run).
+    binding: object | None = None
 
 
 # ------------------------------------------------------------------ operators
@@ -125,6 +127,8 @@ class Comprehension(Expression):
     is_dict: bool
     body: object  # Expression for list comp; DictEntry for dict comp.
     clauses: list[ComprehensionClause]
+    # Filled by the Resolver:
+    locals: list[str] = field(default_factory=list)
 
 
 # --------------------------------------------------------------- index / call
@@ -223,6 +227,9 @@ class StarStarParameter(Parameter):
 class LambdaExpression(Expression):
     parameters: list[Parameter]
     body: Expression
+    # Filled by the Resolver:
+    locals: list[str] = field(default_factory=list)
+    freevars: list[str] = field(default_factory=list)
 
 
 # ------------------------------------------------------------- statements
@@ -266,6 +273,9 @@ class DefStatement(Statement):
     name: Identifier
     parameters: list[Parameter]
     body: list[Statement]
+    # Filled by the Resolver:
+    locals: list[str] = field(default_factory=list)
+    freevars: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -305,6 +315,8 @@ class StarlarkFile:
     file: str
     statements: list[Statement]
     errors: list  # list[SyntaxError]; avoid circular import in annotations
+    # Filled by the Resolver:
+    globals: list[str] = field(default_factory=list)
 
 
 __all__ = [
