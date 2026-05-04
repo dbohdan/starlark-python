@@ -1,0 +1,154 @@
+"""Predeclared builtins for the Bazel-style conformance suite.
+
+These match `reference/src/test/java/net/starlark/java/eval/ScriptTest.java`.
+Conformance .star files use them as predeclared globals (not via load()).
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+from .builtins import _call_starlark
+from .errors import EvalError
+from .values import (
+    BuiltinFunction,
+    equal,
+    repr_starlark,
+)
+
+
+@dataclass
+class _Reporter:
+    """Collects reported errors. assert_eq/assert_ append; assert_fails uses for matching."""
+
+    errors: list[str] = field(default_factory=list)
+
+
+# Per-thread reporter; mirrors the Java ScriptTest's StarlarkThread.threadLocal.
+_REPORTERS: list[_Reporter] = []
+
+
+def push_reporter() -> _Reporter:
+    r = _Reporter()
+    _REPORTERS.append(r)
+    return r
+
+
+def pop_reporter() -> _Reporter:
+    return _REPORTERS.pop()
+
+
+def _report(msg: str) -> None:
+    if _REPORTERS:
+        _REPORTERS[-1].errors.append(msg)
+    else:
+        # No reporter registered; surface as an EvalError so the user sees it.
+        raise EvalError(msg)
+
+
+# ---------------------------------------------------------------- assertions
+
+
+def b_assert_(cond: Any, msg: Any = "assertion failed") -> None:
+    from .values import truth
+    if not truth(cond):
+        _report(f"assert_: {msg}")
+
+
+def b_assert_eq(x: Any, y: Any) -> None:
+    if not equal(x, y):
+        _report(f"assert_eq: {repr_starlark(x)} != {repr_starlark(y)}")
+
+
+def b_assert_fails(fn: Any, want_error: Any) -> None:
+    if not isinstance(want_error, str):
+        raise EvalError("assert_fails: second argument must be a string regex")
+    try:
+        pattern = re.compile(want_error)
+    except re.error:
+        raise EvalError(f"assert_fails: invalid regexp: {want_error}") from None
+    try:
+        _call_starlark(fn)
+    except EvalError as e:
+        if not pattern.search(e.message):
+            _report(
+                f"assert_fails: regex {want_error!r} did not match error: {e.message}"
+            )
+        return
+    _report(
+        f"assert_fails: evaluation succeeded unexpectedly (want match for {want_error!r})"
+    )
+
+
+# ---------------------------------------------------------------- struct
+
+
+@dataclass
+class Struct:
+    """A simple immutable record. `s.x` returns the field x."""
+
+    fields: dict
+    _frozen: bool = True
+
+    _starlark_type = "struct"
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_") or name == "fields":
+            raise AttributeError(name)
+        if name in self.fields:
+            return self.fields[name]
+        raise EvalError(f"struct has no field {name!r}")
+
+
+def b_struct(**kwargs) -> Struct:
+    return Struct(fields=dict(kwargs))
+
+
+def b_mutablestruct(**kwargs) -> Struct:
+    s = Struct(fields=dict(kwargs))
+    s._frozen = False
+    return s
+
+
+def b_freeze(*args) -> None:
+    if not args:
+        # Freeze the whole module — use the current mutability if any.
+        return  # for now, no-op
+    x = args[0]
+    if hasattr(x, "mutability"):
+        x.mutability.freeze()
+        return
+    if isinstance(x, Struct):
+        x._frozen = True
+        return
+    raise EvalError(f"{type(x).__name__} value is not freezable")
+
+
+def b_int_mul_slow(x: int, y: int) -> int:
+    return x * y
+
+
+# ---------------------------------------------------------------- registry
+
+
+def make_predeclared() -> dict[str, Any]:
+    pairs = [
+        ("assert_", b_assert_),
+        ("assert_eq", b_assert_eq),
+        ("assert_fails", b_assert_fails),
+        ("freeze", b_freeze),
+        ("struct", b_struct),
+        ("mutablestruct", b_mutablestruct),
+        ("int_mul_slow", b_int_mul_slow),
+    ]
+    return {name: BuiltinFunction(name=name, impl=fn) for name, fn in pairs}
+
+
+__all__ = [
+    "Struct",
+    "make_predeclared",
+    "pop_reporter",
+    "push_reporter",
+]

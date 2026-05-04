@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .eval.builtins import make_universal
 from .eval.errors import EvalError
 from .eval.evaluator import Thread, eval_file
 from .eval.module import Module
@@ -16,11 +17,12 @@ __version__ = "0.0.0"
 def eval(source: str, filename: str = "<expr>", **env: Any) -> Any:
     """Evaluate a Starlark expression and return the resulting value.
 
-    `env` provides predeclared/universal names. By default the universal set
-    is empty except for None/True/False, which are special-cased.
+    Extra keyword args are added to the universal namespace, on top of the
+    full set of core builtins (`len`, `range`, `print`, …).
     """
     expr = parse_expression(source, file=filename)
-    universal = dict(env)
+    universal = make_universal()
+    universal.update(env)
     module = Module(filename)
     locs = Lexer(source, file=filename).locs
     thread = Thread(module=module, universal=universal, locs=locs)
@@ -31,15 +33,16 @@ def eval(source: str, filename: str = "<expr>", **env: Any) -> Any:
         statements=[_ast.ExpressionStatement(start=expr.start, end=expr.end, expression=expr)],
         errors=[],
     )
-    resolve(file, locs, universal=frozenset(env) | {"None", "True", "False"})
+    resolve(file, locs, universal=frozenset(universal))
     if file.errors:
         raise StarlarkSyntaxException(file.errors)
-    # eval_file's last statement value is not captured; use _eval_expr directly.
+    from .eval.builtins import with_mutability, with_thread
     from .eval.evaluator import Frame, _eval_expr
     frame = Frame(locals_=module.globals, function_name="<expr>", module=module)
     thread.frames.append(frame)
     try:
-        return _eval_expr(expr, frame, thread)
+        with with_mutability(module.mutability), with_thread(thread):
+            return _eval_expr(expr, frame, thread)
     finally:
         thread.frames.pop()
 
@@ -59,18 +62,22 @@ def exec_file(
     file = parse(source, file=filename)
     locs = Lexer(source, file=filename).locs
     pre = predeclared or {}
-    uni = universal or {}
+    uni = make_universal()
+    if universal:
+        uni.update(universal)
     resolve(
         file,
         locs,
         predeclared=frozenset(pre),
-        universal=frozenset(uni) | {"None", "True", "False"},
+        universal=frozenset(uni),
     )
     if file.errors:
         raise StarlarkSyntaxException(file.errors)
     module = Module(filename)
     thread = Thread(module=module, predeclared=pre, universal=uni, locs=locs)
-    eval_file(file, thread)
+    from .eval.builtins import with_mutability, with_thread
+    with with_mutability(module.mutability), with_thread(thread):
+        eval_file(file, thread)
     return module
 
 
