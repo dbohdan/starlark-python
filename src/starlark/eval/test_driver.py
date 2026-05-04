@@ -88,21 +88,25 @@ def b_assert_fails(fn: Any, want_error: Any) -> None:
 class Struct:
     """A simple record. `s.x` returns the field x. Field access goes via the
     evaluator's `_attr_get`, which special-cases anything with a `fields` dict.
+    Mutable variants from `mutablestruct(...)` allow `s.x = v`.
     """
 
     __slots__ = ("_frozen", "fields")
-
-    _starlark_type = "struct"
 
     def __init__(self, fields: dict, frozen: bool = True) -> None:
         self.fields = fields
         self._frozen = frozen
 
+    @property
+    def _starlark_type(self) -> str:
+        return "struct" if self._frozen else "mutablestruct"
+
     def __repr__(self) -> str:
         body = ", ".join(
             f"{k} = {repr_starlark(v)}" for k, v in self.fields.items()
         )
-        return f"struct({body})"
+        prefix = "struct" if self._frozen else "mutablestruct"
+        return f"{prefix}({body})"
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Struct):
@@ -129,17 +133,19 @@ def b_mutablestruct(**kwargs) -> Struct:
     return s
 
 
-def b_freeze(*args) -> None:
+def b_freeze(*args) -> Any:
     if not args:
-        # Freeze the whole module — use the current mutability if any.
-        return  # for now, no-op
+        return None
     x = args[0]
     if hasattr(x, "mutability"):
-        x.mutability.freeze()
-        return
+        from .mutability import Mutability
+        m = Mutability(x.mutability.name)
+        m.freeze()
+        x.mutability = m
+        return x
     if isinstance(x, Struct):
         x._frozen = True
-        return
+        return x
     raise EvalError(f"{type(x).__name__} value is not freezable")
 
 

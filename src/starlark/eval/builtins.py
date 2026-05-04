@@ -76,6 +76,18 @@ def _call_starlark(fn: Any, *args: Any) -> Any:
     return _call(fn, list(args), {}, _CURRENT_THREAD[-1])
 
 
+def _check_callable(name: str, value: Any) -> None:
+    """Raise EvalError if `value` isn't a callable (Starlark or builtin)."""
+    if value is None:
+        return
+    from .function import StarlarkFunction
+    if isinstance(value, (BuiltinFunction, StarlarkFunction)):
+        return
+    raise EvalError(
+        f"parameter '{name}' got value of type '{starlark_type(value)}', want 'callable or NoneType'"
+    )
+
+
 # ---------------------------------------------------------------- helpers
 
 
@@ -290,6 +302,7 @@ def b_reversed(x: Any) -> StarlarkList:
 
 
 def b_sorted(x: Any, *, key: Any = None, reverse: bool = False) -> StarlarkList:
+    _check_callable("key", key)
     items = list(_to_iter(x))
     keys = [_call_starlark(key, v) if key is not None else v for v in items]
 
@@ -321,12 +334,20 @@ def b_max(*args, key: Any = None) -> Any:
 
 
 def _min_max(args, key, *, _is_min: bool) -> Any:
+    _check_callable("key", key)
     if len(args) == 0:
-        raise EvalError("expected at least one argument")
+        raise EvalError("expected at least one item")
     if len(args) == 1:
-        items = list(_to_iter(args[0]))
+        # Single-arg case: iterate.
+        try:
+            it = _to_iter(args[0])
+        except EvalError:
+            raise EvalError(
+                f"type '{starlark_type(args[0])}' is not iterable"
+            ) from None
+        items = list(it)
         if not items:
-            raise EvalError("argument is empty")
+            raise EvalError("expected at least one item")
     else:
         items = list(args)
     best = items[0]

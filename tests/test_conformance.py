@@ -42,10 +42,7 @@ XFAIL_FILES: dict[str, str] = {
     "fields.star": "struct.fields()",
     "function.star": "lambda kwargs / edge cases",
     "loop.star": "complex loop semantics",
-    "cycles.star": "circular reference detection",
-    "dict.star": "dict edge cases",
     "range.star": "range edge cases",
-    "min_max.star": "min/max edge cases",
     "sorted.star": "sorted: nan placement & utf8 setting",
 }
 

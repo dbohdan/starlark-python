@@ -15,7 +15,7 @@ from ..syntax.location import Position
 from .errors import EvalError
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, eq=False)  # identity equality + hash
 class StarlarkFunction:
     """A user-defined function — produced by a `def` or `lambda` expression."""
 

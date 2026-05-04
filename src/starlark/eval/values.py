@@ -223,14 +223,16 @@ class Dict:
         return iter(self._data)
 
     def __contains__(self, key: Any) -> bool:
+        check_hashable(key)
         return key in self._data
 
     def __getitem__(self, key: Any) -> Any:
         if key not in self._data:
-            raise EvalError(f"key not found in dictionary: {repr_starlark(key)}")
+            raise EvalError(f"KeyError: {repr_starlark(key)}")
         return self._data[key]
 
     def get(self, key: Any, default: Any = None) -> Any:
+        check_hashable(key)
         return self._data.get(key, default)
 
     def keys(self) -> list:
@@ -271,7 +273,7 @@ class Dict:
     def __delitem__(self, key: Any) -> None:
         self.mutability.check("dict")
         if key not in self._data:
-            raise EvalError(f"key not found in dictionary: {repr_starlark(key)}")
+            raise EvalError(f"KeyError: {repr_starlark(key)}")
         del self._data[key]
 
     def update(self, other) -> None:
@@ -289,25 +291,31 @@ class Dict:
 
     def setdefault(self, key: Any, default: Any) -> Any:
         check_hashable(key)
+        # Always check mutability — a frozen dict rejects setdefault even if
+        # the key already exists (matches the Java reference's behavior).
+        self.mutability.check("dict")
         if key in self._data:
             return self._data[key]
-        self.mutability.check("dict")
         self._data[key] = default
         return default
 
     def pop(self, key: Any, *default) -> Any:
+        check_hashable(key)
+        # Check mutability before reading: even if key is missing and we'd
+        # return the default, calling pop on a frozen dict is an error.
         self.mutability.check("dict")
         if key in self._data:
             return self._data.pop(key)
         if default:
             return default[0]
-        raise EvalError(f"key not found in dictionary: {repr_starlark(key)}")
+        raise EvalError(f"KeyError: {repr_starlark(key)}")
 
     def popitem(self) -> tuple:
         self.mutability.check("dict")
         if not self._data:
-            raise EvalError("popitem(): dictionary is empty")
-        key = next(reversed(self._data))
+            raise EvalError("empty dictionary")
+        # Starlark popitem is FIFO (first-inserted), unlike Python's LIFO.
+        key = next(iter(self._data))
         value = self._data.pop(key)
         return (key, value)
 
@@ -488,7 +496,14 @@ def check_hashable(value: Any) -> None:
         return
     if isinstance(value, Range):
         return
+    # User-defined Starlark functions are hashable by identity.
+    from .function import StarlarkFunction
+    if isinstance(value, StarlarkFunction):
+        return
     raise EvalError(f"unhashable type: '{starlark_type(value)}'")
+
+
+_EQUAL_SEEN: list[set] = []
 
 
 def equal(a: Any, b: Any) -> bool:
@@ -497,7 +512,24 @@ def equal(a: Any, b: Any) -> bool:
     Distinct types compare unequal. The bool/int special case follows the
     Java reference (which inherits Java's `Boolean.equals(Integer)` returning
     false), so `True == 1` is False in Starlark — matching the spec.
+
+    Cycles between mutable values are handled by recording each pair we're
+    currently comparing; a recurrence is treated as equal at that level.
     """
+    if isinstance(a, (StarlarkList, Dict, StarlarkSet)) and isinstance(
+        b, (StarlarkList, Dict, StarlarkSet)
+    ):
+        pair = (id(a), id(b))
+        if not _EQUAL_SEEN:
+            _EQUAL_SEEN.append(set())
+        seen = _EQUAL_SEEN[-1]
+        if pair in seen:
+            return True
+        seen.add(pair)
+        try:
+            return a == b
+        finally:
+            seen.discard(pair)
     if type(a) is type(b):
         return a == b
     # bool/int cross: spec says distinct — explicitly check before int/float.
@@ -509,7 +541,10 @@ def equal(a: Any, b: Any) -> bool:
 
 
 def less_than(a: Any, b: Any) -> bool:
-    """Starlark `<`. Same-type ordered; numeric int <-> float allowed."""
+    """Starlark `<`. Same-type ordered; numeric int <-> float allowed.
+
+    NaN sorts greater than every non-NaN value (matching Java's Double.compare).
+    """
     if isinstance(a, bool) and isinstance(b, bool):
         return (not a) and b
     # Reject bool vs non-bool numeric per the spec.
@@ -518,6 +553,15 @@ def less_than(a: Any, b: Any) -> bool:
             f"unsupported comparison: {starlark_type(a)} < {starlark_type(b)}"
         )
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        # Handle NaN: NaN > everything, NaN == NaN.
+        a_nan = isinstance(a, float) and a != a
+        b_nan = isinstance(b, float) and b != b
+        if a_nan and b_nan:
+            return False
+        if a_nan:
+            return False  # NaN sorts to the end
+        if b_nan:
+            return True
         return a < b
     if isinstance(a, str) and isinstance(b, str):
         return a < b
@@ -531,16 +575,28 @@ def less_than(a: Any, b: Any) -> bool:
             if not equal(x, y):
                 return less_than(x, y)
         return len(a) < len(b)
+    # Order-independent error message: report the pair sorted by type-name
+    # so that `min(int, string)` and `min(string, int)` give the same text.
+    types = sorted([starlark_type(a), starlark_type(b)])
     raise EvalError(
-        f"unsupported comparison: {starlark_type(a)} < {starlark_type(b)}"
+        f"unsupported comparison: {types[0]} <=> {types[1]}"
     )
 
 
 # --------------------------------------------------------------- repr
 
 
-def repr_starlark(value: Any) -> str:
+def repr_starlark(value: Any, _seen: set | None = None) -> str:
     """Returns the canonical Starlark representation of a value (`repr(x)`)."""
+    if _seen is None:
+        _seen = set()
+    # Cycle detection for mutable containers. Render the recursive
+    # reference as a bare `...` so the surrounding container's brackets are
+    # preserved (matches Java's CycleDetector behavior).
+    if isinstance(value, (StarlarkList, Dict, StarlarkSet)):
+        if id(value) in _seen:
+            return "..."
+        _seen = _seen | {id(value)}
     if value is None:
         return "None"
     if value is True:
@@ -555,22 +611,23 @@ def repr_starlark(value: Any) -> str:
         return _str_repr(value)
     if isinstance(value, tuple):
         if len(value) == 1:
-            return f"({repr_starlark(value[0])},)"
-        return "(" + ", ".join(repr_starlark(x) for x in value) + ")"
+            return f"({repr_starlark(value[0], _seen)},)"
+        return "(" + ", ".join(repr_starlark(x, _seen) for x in value) + ")"
     if isinstance(value, StarlarkList):
-        return "[" + ", ".join(repr_starlark(x) for x in value) + "]"
+        return "[" + ", ".join(repr_starlark(x, _seen) for x in value) + "]"
     if isinstance(value, Dict):
         return (
             "{"
             + ", ".join(
-                f"{repr_starlark(k)}: {repr_starlark(v)}" for k, v in value.items()
+                f"{repr_starlark(k, _seen)}: {repr_starlark(v, _seen)}"
+                for k, v in value.items()
             )
             + "}"
         )
     if isinstance(value, StarlarkSet):
         if len(value) == 0:
             return "set()"
-        return "set([" + ", ".join(repr_starlark(x) for x in value) + "])"
+        return "set([" + ", ".join(repr_starlark(x, _seen) for x in value) + "])"
     if isinstance(value, Range):
         if value.step == 1:
             return f"range({value.start}, {value.stop})"

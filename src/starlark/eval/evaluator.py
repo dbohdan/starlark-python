@@ -585,7 +585,7 @@ def _bitwise(op: TokenKind, a: Any, b: Any) -> Any:
                 if x not in a:
                     out._data[x] = None
             return out
-    raise EvalError(f"unsupported bitwise operation between {starlark_type(a)} and {starlark_type(b)}")
+    raise EvalError(f"unsupported binary operation: {starlark_type(a)} | {starlark_type(b)}")
 
 
 def _set_op(a: StarlarkSet, b: StarlarkSet, keep) -> StarlarkSet:
@@ -733,7 +733,13 @@ def _attr_get(obj: Any, name: str) -> Any:
 
 
 def _attr_set(obj: Any, name: str, value: Any) -> None:
-    raise EvalError(f"cannot set attribute {name!r} on {starlark_type(obj)}")
+    # Mutable structs allow field assignment.
+    fields = getattr(obj, "fields", None)
+    frozen = getattr(obj, "_frozen", True)
+    if isinstance(fields, dict) and not frozen:
+        fields[name] = value
+        return
+    raise EvalError(f"{starlark_type(obj)} value does not support field assignment")
 
 
 def _eval_call(expr: ast.CallExpression, frame: Frame, thread: Thread) -> Any:
