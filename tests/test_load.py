@@ -10,7 +10,7 @@ from starlark.eval import EvalError, Module
 
 def test_load_no_loader_raises():
     src = 'load("m.star", "x")\n'
-    with pytest.raises(EvalError, match="load.* not allowed"):
+    with pytest.raises(EvalError, match=r"load.* not allowed"):
         starlark.exec_file(src)
 
 

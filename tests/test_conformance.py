@@ -95,17 +95,21 @@ def run_chunk(name: str, chunk: str) -> list[str]:
             error_messages: list[str] = []
         except starlark.EvalError as e:
             evaluated = False
-            error_messages = [e.message] + list(reporter.errors)
+            error_messages = [e.message, *reporter.errors]
         except Exception as e:  # SyntaxException etc.
             evaluated = False
-            error_messages = [str(e)] + list(reporter.errors)
+            error_messages = [str(e), *reporter.errors]
 
         # Match expectations.
         unmatched = [(line, pat.pattern) for line, pat in expected]
         for line, pat in expected:
             for msg in error_messages:
                 if pat.search(msg):
-                    unmatched = [(l, p) for l, p in unmatched if l != line or p != pat.pattern]
+                    unmatched = [
+                        (ml, mp)
+                        for ml, mp in unmatched
+                        if ml != line or mp != pat.pattern
+                    ]
                     break
 
         if expected and evaluated:

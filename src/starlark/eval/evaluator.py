@@ -256,7 +256,7 @@ def _assign_to_target(target, value: Any, frame: Frame, thread: Thread) -> None:
             raise EvalError(
                 f"unpack: got {len(items)} values, expected {len(target.elements)}"
             )
-        for sub, v in zip(target.elements, items):
+        for sub, v in zip(target.elements, items, strict=True):
             _assign_to_target(sub, v, frame, thread)
         return
     if isinstance(target, ast.IndexExpression):

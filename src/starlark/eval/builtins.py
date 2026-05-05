@@ -294,7 +294,7 @@ def b_enumerate(x: Any, start: int = 0) -> StarlarkList:
 
 def b_zip(*args) -> StarlarkList:
     iters = [list(_to_iter(a)) for a in args]
-    return StarlarkList([tuple(t) for t in zip(*iters)], _mut())
+    return StarlarkList([tuple(t) for t in zip(*iters, strict=False)], _mut())
 
 
 def b_reversed(x: Any) -> StarlarkList:

@@ -122,7 +122,7 @@ class StarlarkList:
             return NotImplemented
         if len(self) != len(other):
             return False
-        return all(equal(a, b) for a, b in zip(self._data, other._data))
+        return all(equal(a, b) for a, b in zip(self._data, other._data, strict=True))
 
     def __ne__(self, other: object) -> bool:
         eq = self.__eq__(other)
@@ -566,12 +566,12 @@ def less_than(a: Any, b: Any) -> bool:
     if isinstance(a, str) and isinstance(b, str):
         return a < b
     if isinstance(a, tuple) and isinstance(b, tuple):
-        for x, y in zip(a, b):
+        for x, y in zip(a, b, strict=False):
             if not equal(x, y):
                 return less_than(x, y)
         return len(a) < len(b)
     if isinstance(a, StarlarkList) and isinstance(b, StarlarkList):
-        for x, y in zip(a, b):
+        for x, y in zip(a, b, strict=False):
             if not equal(x, y):
                 return less_than(x, y)
         return len(a) < len(b)
@@ -680,7 +680,7 @@ def _str_repr(s: str) -> str:
         elif ch == "\t":
             out.append("\\t")
         elif ord(ch) < 0x20:
-            out.append("\\x%02x" % ord(ch))
+            out.append(f"\\x{ord(ch):02x}")
         else:
             out.append(ch)
     out.append(quote)

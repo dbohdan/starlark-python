@@ -81,8 +81,8 @@ SAFE_FILES = [
 @pytest.mark.parametrize("name", SAFE_FILES)
 def test_cross(name: str):
     path = CONFORMANCE_DIR / name
-    go_status, go_out = _run_go(path)
-    py_status, py_out = _run_python(path)
+    go_status, _go_out = _run_go(path)
+    py_status, _py_out = _run_python(path)
     assert (go_status == 0) == (py_status == 0), (
         f"go status={go_status}, python status={py_status}"
     )
