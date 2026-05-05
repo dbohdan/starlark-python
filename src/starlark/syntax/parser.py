@@ -58,6 +58,7 @@ from .ast import (
     StringLiteral,
     UnaryOperatorExpression,
 )
+from .errors import StarlarkSyntaxException
 from .errors import SyntaxError as StarlarkSyntaxError
 from .lexer import Lexer
 from .tokens import Token, TokenKind
@@ -158,16 +159,35 @@ FORBIDDEN_KEYWORDS: dict[TokenKind, str] = {
 class Parser:
     """A single-shot parser. Produces a `StarlarkFile` plus accumulated errors."""
 
-    __slots__ = ("_errors", "_lexer", "_max_errors", "_recovery", "_tok")
+    __slots__ = ("_depth", "_errors", "_lexer", "_max_depth", "_max_errors", "_recovery", "_tok")
 
-    def __init__(self, lexer: Lexer) -> None:
+    def __init__(self, lexer: Lexer, max_depth: int = 256) -> None:
         self._lexer = lexer
         # Errors are shared with the lexer so the user gets one combined list.
         self._errors: list[StarlarkSyntaxError] = lexer.errors
         self._recovery = False
         self._max_errors = 100
+        # Nesting depth, incremented on every recursive descent into
+        # _parse_primary or _parse_suite. Caps at max_depth to convert a
+        # would-be Python RecursionError into a clean SyntaxError.
+        self._depth = 0
+        self._max_depth = max_depth
         # Prime the first token.
         self._tok = self._fetch()
+
+    def _enter(self) -> None:
+        self._depth += 1
+        if self._depth > self._max_depth:
+            self._error(
+                f"expression too deeply nested (>{self._max_depth} levels)",
+                self._tok.start,
+            )
+            # Raise to abort parsing immediately; recursion would otherwise
+            # blow Python's stack before the caller can react.
+            raise StarlarkSyntaxException(self._errors)
+
+    def _leave(self) -> None:
+        self._depth -= 1
 
     # ---------------------------------------------------------------- token
 
@@ -248,15 +268,32 @@ class Parser:
     # ----------------------------------------------------------- entry points
 
     def parse_file(self, file: str = "<input>") -> StarlarkFile:
-        statements = self._parse_file_input()
+        # Each level of source nesting consumes ~12 Python frames in the
+        # _parse_test → _parse_at_prec → ... → _parse_primary chain. To
+        # let our own _max_depth (default 256) actually fire before
+        # Python's RecursionError does, raise the recursion limit while
+        # we parse and restore it afterwards.
+        import sys
+        old = sys.getrecursionlimit()
+        sys.setrecursionlimit(max(old, self._max_depth * 50 + 500))
+        try:
+            statements = self._parse_file_input()
+        finally:
+            sys.setrecursionlimit(old)
         return StarlarkFile(file=file, statements=statements, errors=self._errors)
 
     def parse_expression(self) -> Expression:
-        e = self._parse_test_expr()
-        # Skip any trailing NEWLINE that the lexer always inserts.
-        while self._at(TokenKind.NEWLINE):
-            self._next()
-        self._expect(TokenKind.EOF)
+        import sys
+        old = sys.getrecursionlimit()
+        sys.setrecursionlimit(max(old, self._max_depth * 50 + 500))
+        try:
+            e = self._parse_test_expr()
+            # Skip any trailing NEWLINE that the lexer always inserts.
+            while self._at(TokenKind.NEWLINE):
+                self._next()
+            self._expect(TokenKind.EOF)
+        finally:
+            sys.setrecursionlimit(old)
         return e
 
     # ----------------------------------------------------------- file_input
@@ -459,19 +496,23 @@ class Parser:
         return MandatoryParameter(start=id_.start, end=id_.end, name=id_)
 
     def _parse_suite(self) -> list[Statement]:
-        out: list[Statement] = []
-        if self._at(TokenKind.NEWLINE):
-            self._expect(TokenKind.NEWLINE)
-            if not self._at(TokenKind.INDENT):
-                self._error("expected an indented block", self._tok.start)
-                return out
-            self._expect(TokenKind.INDENT)
-            while not self._at(TokenKind.OUTDENT) and not self._at(TokenKind.EOF):
-                self._parse_statement(out)
-            self._expect_and_recover(TokenKind.OUTDENT)
-        else:
-            self._parse_simple_statement(out)
-        return out
+        self._enter()
+        try:
+            out: list[Statement] = []
+            if self._at(TokenKind.NEWLINE):
+                self._expect(TokenKind.NEWLINE)
+                if not self._at(TokenKind.INDENT):
+                    self._error("expected an indented block", self._tok.start)
+                    return out
+                self._expect(TokenKind.INDENT)
+                while not self._at(TokenKind.OUTDENT) and not self._at(TokenKind.EOF):
+                    self._parse_statement(out)
+                self._expect_and_recover(TokenKind.OUTDENT)
+            else:
+                self._parse_simple_statement(out)
+            return out
+        finally:
+            self._leave()
 
     # ----------------------------------------------------------- expressions
 
@@ -597,6 +638,13 @@ class Parser:
     # -------------------------------------------------------------- primary
 
     def _parse_primary(self) -> Expression:
+        self._enter()
+        try:
+            return self._parse_primary_inner()
+        finally:
+            self._leave()
+
+    def _parse_primary_inner(self) -> Expression:
         tok = self._tok
         kind = tok.kind
         if kind == TokenKind.INT:

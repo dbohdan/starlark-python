@@ -91,7 +91,17 @@ class Thread:
     Predeclared and universal envs are read-only dicts (host-supplied).
     """
 
-    __slots__ = ("active", "frames", "loader", "locs", "module", "predeclared", "universal")
+    __slots__ = (
+        "active",
+        "depth",
+        "frames",
+        "loader",
+        "locs",
+        "max_depth",
+        "module",
+        "predeclared",
+        "universal",
+    )
 
     def __init__(
         self,
@@ -100,17 +110,24 @@ class Thread:
         universal: dict[str, Any] | None = None,
         locs: FileLocations | None = None,
         loader=None,
+        max_depth: int | None = None,
     ) -> None:
         self.module = module
         self.predeclared = predeclared or {}
         self.universal = universal or {}
         self.frames: list[Frame] = []
         self.locs = locs
-        # Set of `id(StarlarkFunction)` currently executing — used to reject
-        # recursion (Starlark spec: recursion is forbidden).
+        # Set of `id(ast_node)` currently executing — used to reject recursion
+        # (Starlark spec: recursion is forbidden).
         self.active: set[int] = set()
         # Optional `Callable[[str], Module]` for resolving load() statements.
         self.loader = loader
+        # AST-walk depth, incremented on entry to _eval_expr / _exec_stmt.
+        # Capped to defuse stack-overflow on deeply nested values constructed
+        # at runtime (e.g. `for i in range(N): x = [x]` with large N).
+        from .limits import MAX_NESTING_DEPTH
+        self.depth = 0
+        self.max_depth = max_depth if max_depth is not None else MAX_NESTING_DEPTH
 
 
 # ---------------------------------------------------------------- entry
@@ -313,6 +330,17 @@ def _assign_to_target(target, value: Any, frame: Frame, thread: Thread) -> None:
 
 
 def _eval_expr(expr, frame: Frame, thread: Thread) -> Any:
+    thread.depth += 1
+    if thread.depth > thread.max_depth:
+        thread.depth -= 1
+        raise EvalError(f"expression too deeply nested (>{thread.max_depth} levels)")
+    try:
+        return _eval_expr_inner(expr, frame, thread)
+    finally:
+        thread.depth -= 1
+
+
+def _eval_expr_inner(expr, frame: Frame, thread: Thread) -> Any:
     if isinstance(expr, ast.IntLiteral):
         return expr.value
     if isinstance(expr, ast.FloatLiteral):

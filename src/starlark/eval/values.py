@@ -615,10 +615,19 @@ def less_than(a: Any, b: Any) -> bool:
 # --------------------------------------------------------------- repr
 
 
-def repr_starlark(value: Any, _seen: set | None = None) -> str:
+def repr_starlark(value: Any, _seen: set | None = None, _depth: int = 0) -> str:
     """Returns the canonical Starlark representation of a value (`repr(x)`)."""
     if _seen is None:
         _seen = set()
+    # Defuse stack overflow on deeply nested non-cyclic structures (e.g.,
+    # `x = []` then `for i in range(N): x = [x]`). The cycle-detection set
+    # already handles cyclic references; this catches the linear-deep case.
+    from .limits import MAX_NESTING_DEPTH
+    if _depth > MAX_NESTING_DEPTH:
+        from .errors import EvalError as _EE
+        raise _EE(
+            f"value too deeply nested for repr (>{MAX_NESTING_DEPTH} levels)"
+        )
     # Cycle detection for mutable containers. Render the recursive
     # reference as a bare `...` so the surrounding container's brackets are
     # preserved (matches Java's CycleDetector behavior).
@@ -640,15 +649,16 @@ def repr_starlark(value: Any, _seen: set | None = None) -> str:
         return _str_repr(value)
     if isinstance(value, tuple):
         if len(value) == 1:
-            return f"({repr_starlark(value[0], _seen)},)"
-        return "(" + ", ".join(repr_starlark(x, _seen) for x in value) + ")"
+            return f"({repr_starlark(value[0], _seen, _depth + 1)},)"
+        return "(" + ", ".join(repr_starlark(x, _seen, _depth + 1) for x in value) + ")"
     if isinstance(value, StarlarkList):
-        return "[" + ", ".join(repr_starlark(x, _seen) for x in value) + "]"
+        return "[" + ", ".join(repr_starlark(x, _seen, _depth + 1) for x in value) + "]"
     if isinstance(value, Dict):
         return (
             "{"
             + ", ".join(
-                f"{repr_starlark(k, _seen)}: {repr_starlark(v, _seen)}"
+                f"{repr_starlark(k, _seen, _depth + 1)}: "
+                f"{repr_starlark(v, _seen, _depth + 1)}"
                 for k, v in value.items()
             )
             + "}"
@@ -656,7 +666,7 @@ def repr_starlark(value: Any, _seen: set | None = None) -> str:
     if isinstance(value, StarlarkSet):
         if len(value) == 0:
             return "set()"
-        return "set([" + ", ".join(repr_starlark(x, _seen) for x in value) + "])"
+        return "set([" + ", ".join(repr_starlark(x, _seen, _depth + 1) for x in value) + "])"
     if isinstance(value, Range):
         if value.step == 1:
             return f"range({value.start}, {value.stop})"

@@ -20,6 +20,15 @@ from .errors import EvalError
 # fail fast on accidental-or-malicious overflow.
 MAX_CONTAINER_ELEMENTS = 1 << 24
 
+# Cap on AST / call-stack nesting depth. The parser and evaluator each
+# recurse into Python's call stack; deep input (a 5000-level-nested list
+# literal, or a function whose body is a 5000-deep `if/elif/else`) would
+# otherwise raise Python's RecursionError, which leaks Python frames in
+# the traceback and isn't a clean EvalError. 256 matches the JSON
+# decoder's depth cap; below Python's default recursion limit (1000)
+# with comfortable headroom for our own dispatch frames.
+MAX_NESTING_DEPTH = 256
+
 
 def check_container_size(n: int, *, label: str = "elements") -> int:
     """Reject an allocation request larger than `MAX_CONTAINER_ELEMENTS`.
