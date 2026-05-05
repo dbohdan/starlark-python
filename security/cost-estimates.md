@@ -1,225 +1,179 @@
-# Cost estimates: thread-safety and resource limits
+# Implementation notes: thread-safety and resource limits
 
-These are estimates for the two largest items left on the table after
-the small fixes (sandbox-boundary test, centralized size cap, depth
-caps) landed. Each estimate covers difficulty, time, and added
-complexity. Numbers are calibrated against the small-fixes work, which
-took roughly half a day total.
+These were the largest items left after the small fixes (sandbox-boundary
+test, centralized size cap, depth caps) landed. This document records
+what was done, what it actually cost, and what the remaining options are
+if the host needs stricter bounds than the implemented charge-only model
+provides.
 
-## Going thread-safe
+## Phase A — thread-safety
 
-### What it means
+### What was done
 
-Replace the module-level stacks `_CURRENT_THREAD` and
-`_CURRENT_MUTABILITY` (in `eval/builtins.py`) and `_REPORTERS` (in
-`eval/test_driver.py`) with explicit threading. After the change, two
-host threads can call `starlark.eval` concurrently against different
-modules without interfering with each other.
+Replaced the three module-level stacks
+(`_CURRENT_THREAD`, `_CURRENT_MUTABILITY` in `eval/builtins.py`;
+`_REPORTERS` in `eval/test_driver.py`) with `contextvars.ContextVar`s.
+`ContextVar` isolates state per OS thread and per asyncio task, so two
+host threads can call `starlark.exec_file` concurrently without
+stomping on each other. Within a thread, nested `with_thread` /
+`with_mutability` use the `Token` returned by `.set()` for save and
+restore.
 
-### Approach
+The originally-estimated approach was to thread an explicit `Thread`
+parameter through every builtin (~150 sites). I rejected that in favour
+of `ContextVar`s for three reasons:
 
-The cleanest design is the one the retrospective already proposes:
+- The diff is ~30 lines instead of ~600.
+- `contextvars` is the canonical Python idiom for exactly this use case
+  (asyncio, FastAPI, Sentry, OpenTelemetry all use it).
+- The "per-evaluation state passed implicitly" semantics map cleanly:
+  builtins that need the Thread call `current_thread()`; builtins that
+  don't, ignore it.
 
-- `BuiltinFunction.impl` becomes `Callable[[Thread, ...], Any]` rather
-  than `Callable[..., Any]`. The first parameter is always the current
-  `Thread`.
-- `evaluator.call(fn, args, kwargs, thread)` invokes `fn.impl(thread,
-  *args, **kwargs)` for builtins.
-- The reporter argument used by `assert_eq` / `assert_fails` lives on
-  `Thread` rather than in a module-level list.
-- `Mutability` access goes through `thread.module.mutability` instead
-  of the global stack.
+The trade-off is one Pyright/typing point: `ContextVar.get(default)`
+returns `T | None`, so callers handle the unset-context case. This is
+fine in practice — only relevant for unit tests that build values
+directly without a Thread.
 
-Builtins that don't actually need the thread can ignore it. The
-trade-off is verbosity: every signature gains a parameter.
+### Cost vs estimate
 
-### Difficulty
+Estimated 1–2 days, low difficulty. Actual: about an hour, mostly
+mechanical. The 8-test suite in `tests/test_thread_safety.py` covers
+parallel exec_file, parallel `sorted(key=fn)` callbacks, parallel
+`freeze()`, parallel reporter, nested exec_file in one thread, and
+stress sweeps at 2/4/8 workers.
 
-**Low.** The change is mechanical. Each builtin needs:
+## Phase B — step counter
 
-- One extra parameter in its signature.
-- A `thread.module.mutability` instead of `_mut()` for any allocation
-  it does.
-- A `thread.<...>` instead of `_CURRENT_THREAD[-1]` for any callback
-  to user-defined Starlark code.
+### What was done
 
-Tests cost: low. The end-to-end tests already go through
-`starlark.eval` / `exec_file`, which already have a `Thread`. The unit
-tests in `tests/test_methods.py` etc. mostly call methods through
-Starlark expressions, so they benefit transparently. A handful of
-direct-call unit tests in `tests/test_values.py` need a `Thread`
-threaded through.
+Added `Thread.steps`, `Thread.max_steps`, `Thread.on_max_steps`. New
+`tick()` method increments and raises `StepLimitExceeded` when the cap
+is exceeded; an optional callback fires once before the raise (modeled
+on starlark-go's `Thread.OnMaxSteps`).
 
-### Time
+Charged at three sites in `eval/evaluator.py`:
 
-**1–2 days.** Roughly:
+- Top of `_exec_stmt` — one charge per statement.
+- Top of `_eval_expr` — one charge per expression-node visit.
+- Entry of `call()` — one charge per call (catches builtin→user
+  callbacks like `sorted(key=fn)` that bypass `_eval_expr`).
 
-- 2 hours: redesign `BuiltinFunction` interface and `evaluator.call`.
-- 4 hours: update every builtin signature
-  (~30 in `builtins.py`, ~7 in `test_driver.py`, ~30 string methods,
-  ~20 collection methods, 4 json methods).
-- 2 hours: update tests that construct builtins or call `_mut()` /
-  `_CURRENT_THREAD` directly.
-- 2 hours: shake out residual bugs from missed sites.
+The unit is intentionally coarse and matches starlark-java's documented
+choice. It is **not commensurable** with bytecode or wall-clock time.
+Sub-expressions tick recursively so `sum([i for i in range(N)])` is
+bounded by O(N), not O(1).
 
-### Added complexity
+### Cost vs estimate
 
-**Slight increase**. ~150 call sites get one extra parameter; this is
-boilerplate, not conceptual complexity. In return, the code becomes
-substantially easier to reason about: there's no implicit per-eval
-state. Pyright also gets more useful (the global stacks today are
-typed `list[Any]`, which forces casts at call sites).
+Estimated 1 day, low difficulty. Actual: a couple of hours. 11
+step-counter tests cover unlimited default, exact-cap raise, the
+`StepLimitExceeded < ResourceLimitExceeded < EvalError` class hierarchy,
+callback firing semantics, custom-error callbacks, and the threat-model
+adversarial patterns.
+
+## Phase C — heap counter (charge-only)
+
+### What was done
+
+Added `Thread.allocs`, `Thread.max_allocs`, `Thread.on_max_allocs`. New
+`add_allocs(n)` method increments and raises `AllocLimitExceeded` when
+the cap is exceeded; mirrors `tick()` for the alloc dimension.
+
+Charged at every value-allocating site (see `_charge` in
+`eval/values.py` and `_charge_thread_alloc` in `eval/evaluator.py`):
+
+- `StarlarkList.__init__`, `.append`, `.extend`.
+- `Dict.__init__`, `.__setitem__` (only on new keys), `.setdefault`
+  (only on new keys), `.update` (by net new entries).
+- `StarlarkSet.__init__`, `.add` (only on new elements).
+- `Range.__post_init__` (constant; range is lazy).
+- Tuple-literal expressions and `tuple` results from `_plus` / `_multiply`.
+- String allocations from `_plus` / `_multiply` (concatenation and
+  repeat, the only meaningful in-Starlark string growth paths).
+
+Sizes are approximate constants in `eval/limits.py` (`ALLOC_LIST_BASE`,
+etc.), calibrated from `sys.getsizeof` on a 64-bit CPython 3.11 build
+and rounded to round numbers. The counter is documented as approximate.
+
+**Charge-only by design.** The counter measures *cumulative
+allocation*, not live-memory residency. Refunding live bytes would
+require `weakref.finalize` on every value; this was rejected because:
+
+- Python's GC is non-deterministic, so the running total can briefly
+  exceed the bound between allocation and finalizer.
+- Cycles defeat refcount-based release.
+- Native containers (str/tuple) cannot accept weakrefs.
+- Multi-threading would need locks on the increment path.
+
+The "cumulative" semantics make the bound predictable but conservative.
+Hosts should size `max_allocs` at 2–4× the expected steady-state
+working set.
+
+### Cost vs estimate
+
+Estimated 2–3 days, medium difficulty. Actual: a few hours, easier than
+expected. 19 heap-counter tests cover unlimited default, exact-cap
+raise, exception class hierarchy, callback firing semantics, the
+threat-model adversarial patterns (`[0] * N`, big dict, big set,
+list+list in a loop, tight string concatenation, string/tuple repeat),
+step- and alloc-limit independence, and rejection of negative deltas.
+
+The estimate was conservative because every allocation site touched
+goes through one of three chokepoints (`StarlarkList.__init__`,
+`_plus`, `_multiply`); the change is intrusive but uniform, and the
+test surface is small.
+
+## What's still on the table: high-water heap tracking
+
+A future implementation could track *live* bytes via
+`weakref.finalize` callbacks that decrement `Thread.allocs` when a
+value is GC'd. This would change the bound from "cumulative
+allocation" to "high-water mark of live memory", which is what most
+hosts intuitively expect.
+
+### Estimate
+
+Difficulty: high. Time: 5–7 days, plus careful testing of GC behaviour
+under load.
+
+### Cost the estimate didn't capture
+
+- **Per-PR maintenance tax.** Every new wrapper type, every new method
+  that allocates, has to think about: do I need a finalizer? Will it
+  see the right Thread (the one that allocated, or the one current
+  when GC fires)? Does it work under cycles? Charge-only has none of
+  these — it's "increment a counter at one chokepoint."
+- **Dependency on Python GC timing.** Under load you can see brief
+  over-the-limit excursions between allocation and finalizer
+  invocation. Workable for the threat model "can't OOM the host" but
+  not for "exact bound enforced," and that's an important caveat to
+  document.
+- **Native containers (str/tuple) can't accept weakrefs.** You'd need
+  a wrapper layer or a parallel registry keyed by `id()`.
+- **Cycles defeat refcounting.** Python's cycle collector runs only
+  periodically, so circular references in user code (e.g.
+  `x = []; x.append(x)`) defeat finalize-based release until the GC
+  sweeps.
+- **Multi-threading.** Decrementing a shared counter from finalize
+  callbacks needs a lock. Charge-only sidesteps this — one writer per
+  Thread.
 
 ### Recommendation
 
-Worth doing. It's the single largest cleanup left and unblocks any
-future feature that needs to read or write per-thread state (resource
-counters, profiling, host-supplied print sinks, …).
+Keep the implemented charge-only model unless real users hit a case
+where its cumulative semantics force them to set `max_allocs` higher
+than they'd like. If they do, the high-water work is well-scoped: add
+a registry of live values keyed by `id(value)`, register a `finalize`
+in each constructor, decrement in the finalize callback. Document the
+"transient over-limit excursions" caveat prominently.
 
-## Implementing resource limits
+## Combined estimate vs actual
 
-The host-facing API would be:
+Originally estimated: **4.5–6.5 days** for thread-safety + step counter
++ charge-only heap counter + docs.
 
-```python
-starlark.exec_file(
-    src,
-    max_steps=10_000_000,        # CPU bound
-    max_alloc_bytes=64 * 1024**2,  # 64 MB memory bound
-)
-```
-
-A `Thread` with neither set behaves as today; with one or both set, the
-interpreter aborts with `EvalError` when the limit is exceeded. Both
-features depend on the thread-safety work above (the counters belong
-on the `Thread`).
-
-### Step counter
-
-#### What it means
-
-Increment a counter on every statement executed and every loop
-iteration. When it reaches `max_steps`, raise an uncatchable
-`EvalError`. This bounds CPU time as a function of source steps,
-independent of how much work each step does.
-
-#### Approach
-
-- One `int` field on `Thread`: `Thread.steps`.
-- Increment at three sites in `eval/evaluator.py`:
-  - Top of `_exec_stmt` (one charge per statement).
-  - Inside the for-loop body in `_exec_stmt` (one charge per
-    iteration).
-  - Top of `_eval_expr` (debatable — without this, a single huge
-    expression like `sum([x for x in range(N)])` is one step). I'd do
-    it; the cost is negligible and it makes the bound predictable.
-- Charge inside `call()` for each user-function invocation.
-- `Thread.tick()` raises if `self.steps >= self.max_steps`.
-
-This is *not* a perfect CPU bound — a single builtin like
-`sorted(huge)` does O(N log N) work for one charge. But it bounds the
-*number of Starlark-level operations*, which is what the spec implies
-when it says "execution is finite".
-
-#### Difficulty
-
-**Low.** Maybe 50 lines.
-
-#### Time
-
-**1 day** including tests.
-
-#### Added complexity
-
-**Negligible.** It's a counter on `Thread`, three increment sites, and
-one check.
-
-### Heap counter
-
-#### What it means
-
-Charge approximate bytes on every value allocation. When the running
-total exceeds `max_alloc_bytes`, raise `EvalError`. Bounds memory
-*high-water mark* (or *cumulative allocation*, depending on the
-implementation choice).
-
-#### Approach: charge-only (simpler)
-
-- One `int` field on `Thread` or `Module`: `bytes_allocated`.
-- Charge at allocation sites:
-  - `StarlarkList.__init__` charges `~80 + 8 * len(items)`.
-  - `Dict.__init__` charges `~240 + 64 * len(items)`.
-  - `StarlarkSet.__init__` similar.
-  - `_plus` for str/list/tuple charges the new size.
-  - `_multiply` similarly.
-  - `json.decode` charges as it builds containers.
-  - `range()` charges constant — Range is lazy, so the materialization
-    cost is paid by `list(range(...))` etc.
-- Never refund. This is simpler than tracking residency but means the
-  counter measures *cumulative allocation*, not live memory. For a
-  bound that says "this evaluation can allocate at most N bytes total"
-  this is the right semantics.
-
-#### Approach: high-water tracking (more accurate, harder)
-
-Track live allocations using `weakref.finalize` on each value.
-Decrement the counter when a value is GC'd. The bound becomes
-"high-water mark of live memory". Caveat: Python's GC is not
-deterministic, so the running total can exceed the bound briefly
-between allocations and finalizers. Workable but adds non-trivial
-complexity and a small per-value overhead.
-
-#### Difficulty
-
-**Medium.** ~150 lines for charge-only. ~400 lines for high-water
-tracking, plus careful testing of the GC behavior.
-
-#### Time
-
-- **2–3 days** for charge-only.
-- **5–7 days** for high-water tracking.
-
-#### Added complexity
-
-**Charge-only** is conceptually simple (a counter on the Module,
-incremented at known allocation sites) but touches every value
-constructor. The change is intrusive but uniform.
-
-**High-water** introduces a non-obvious dependency on Python GC
-timing; under load you can see brief over-the-limit excursions.
-Workable for the threat model "can't OOM the host" but not for "exact
-bound enforced" — and that's an important caveat to document.
-
-#### Recommendation
-
-If you want this, do **charge-only** first. It defends against the
-DoS scenarios both reviewers cited (`[0] * 10**8`, deeply iterative
-allocation) without the GC complexity. Reach for high-water only if
-real users hit a case where charge-only's "cumulative" semantics
-forces them to set `max_alloc_bytes` higher than they'd like.
-
-## Combined estimate
-
-Doing both, charge-only:
-
-- Thread-safety (prerequisite): **1–2 days**.
-- Step counter: **1 day**.
-- Heap counter (charge-only): **2–3 days**.
-- Documentation, additional tests, threat-model update: **0.5 day**.
-
-**Total: 4.5–6.5 days.**
-
-Doing both, high-water:
-
-- Add 3–4 days for the GC tracking. **7–10 days total.**
-
-If only one is wanted: the **step counter** is cheaper, smaller, and
-prevents the most common adversarial pattern (infinite loops via
-`for i in range(huge)`). I'd start there.
-
-## What this would not give you
-
-Even with both counters, the interpreter is not a security boundary
-suitable for arbitrary public input without a host-side OS sandbox
-(`resource.setrlimit`, separate process, …). Counters defend against
-configurations that are bugs or annoyances; the OS sandbox defends
-against everything else.
+Actual: well under a day, dominated by writing tests rather than
+wiring code. The estimate was reasonable for an explicit-`Thread`
+threading approach; the `ContextVar` rewrite cut the thread-safety
+phase by an order of magnitude, which made the rest cheaper too.

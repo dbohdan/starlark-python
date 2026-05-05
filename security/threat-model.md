@@ -37,41 +37,99 @@ malicious actions:
   the latter and that no builtin ever returns a raw Python `list` /
   `dict` / `set`.
 - **No persistent mutation of host process state visible after eval
-  returns**, with two known exceptions:
+  returns**, with one known exception:
   - `print()` writes to `sys.stderr`. The host can redirect stderr
     before evaluating if it wants log isolation.
-  - The interpreter uses module-level stacks
-    (`_CURRENT_THREAD`, `_CURRENT_MUTABILITY` in `eval/builtins.py`,
-    `_REPORTERS` in `eval/test_driver.py`) to thread context into
-    builtins. These are pushed and popped around each `eval` /
-    `exec_file` call, but they are *not safe under concurrent use*
-    of the interpreter from multiple host threads. See "Limitations"
-    below.
+- **Concurrent use is safe.** The three pieces of per-evaluation
+  context (current `Thread`, current `Mutability`, the test-driver
+  `Reporter`) live in `contextvars.ContextVar`s. Each OS thread sees
+  its own context, so two host threads can call `starlark.exec_file`
+  in parallel without stomping on each other.
+  `tests/test_thread_safety.py` enforces this with parallel-eval,
+  parallel-`sorted(key=fn)`, parallel-`freeze()`, parallel-reporter,
+  and stress sweeps at 2/4/8 workers.
 
-## What the interpreter does **not** defend against
+## Bounded-resource modes the host may opt into
 
-- **CPU exhaustion.** There is **no step counter**. A `for` loop over
-  a large `range`, a deeply nested non-recursive computation, or any
-  CPU-bound construction can run until the host process is killed or
-  the Python recursion limit is hit. The host is responsible for
-  enforcing wall-clock or CPU-time bounds (e.g. via
-  `signal.alarm`, `resource.setrlimit`, or running the evaluator
-  in a subprocess).
-- **Memory exhaustion (in the small).** There is **no heap
-  counter**. Many small allocations can incrementally consume
-  unbounded memory. We only defend against single-allocation worst
-  cases via soft caps (see "Defences against the worst single
-  allocation" below).
-- **Concurrent reentrancy.** The module-level context stacks listed
-  above are not safe if a host runs two evaluations in parallel in
-  the same Python process. Single-threaded use is fine; multi-threaded
-  hosts must serialise calls.
+Bounded-CPU and bounded-memory evaluation are **opt-in features**, off
+by default. A configuration that's known to be fast and small doesn't
+pay the per-instruction counter overhead. Hosts that accept untrusted
+input set both via `exec_file` kwargs (or directly on `Thread`):
 
-## Defences against the worst single allocation
+```python
+import starlark
 
-The interpreter has soft caps that prevent the most common adversarial
-inputs from OOM-ing or hanging the host even without full resource
-counters:
+mod = starlark.exec_file(
+    src,
+    max_steps=10_000_000,                  # CPU bound
+    max_allocs=64 * 1024 * 1024,           # 64 MB memory bound
+    on_max_steps=lambda t: log("step limit reached"),  # optional callback
+    on_max_allocs=lambda t: log("alloc limit reached"),
+)
+
+# After a successful run hosts can read the cost:
+print(f"used {mod.thread.steps} steps, {mod.thread.allocs} bytes")
+```
+
+Both errors subclass `EvalError`, so existing `except EvalError`
+handlers see them. A finer-grained `except` is also possible:
+`StepLimitExceeded` and `AllocLimitExceeded` both subclass
+`ResourceLimitExceeded`.
+
+### Step counter
+
+`Thread.steps` is monotonic; `Thread.max_steps` is the cap. Charged at
+three sites: top of every statement (`_exec_stmt`), top of every
+expression node (`_eval_expr`), and entry of every `call()`. The unit
+is intentionally coarse — Starlark operations, not Python instructions
+— and matches starlark-java's documented choice. Sub-expressions tick
+recursively, so `sum([i for i in range(N)])` is bounded by O(N), not
+O(1).
+
+The unit is **not commensurable** with bytecode or wall-clock time. A
+single `sorted(huge_list)` or `dict.update(huge_dict)` does O(N log N)
+or O(N) work for one Starlark step, so a step bound is a soft CPU
+bound, not a hard one. Combine with `resource.setrlimit` for a hard
+CPU ceiling against unknown-unknowns.
+
+### Heap counter
+
+`Thread.allocs` is monotonic; `Thread.max_allocs` is the cap.
+Charge-only — values that go out of scope are **not refunded**. The
+counter measures *cumulative allocation*, not live-memory residency.
+Charged in every container constructor (`StarlarkList`, `Dict`,
+`StarlarkSet`, `Range`), every mutating concat / extend / insert, and
+every `+` / `*` that produces a new container or string. Sizes are
+approximate (rounded constants in `eval/limits.py`); precise residency
+would need `weakref` GC tracking, which the cost-estimates document
+rejected as too complex for the security benefit.
+
+The cumulative-vs-live semantics matter: a program that allocates 64
+MB in scratch values and lets them GC'd will still report 64 MB used.
+Hosts should choose `max_allocs` accordingly — `2x` to `4x` the
+expected steady-state working set is a reasonable starting point.
+
+## What the interpreter still does **not** defend against
+
+Even with both counters enabled:
+
+- **Wall-clock time outside the step counter.** A single big builtin
+  call (e.g. `sorted(N=10⁶ items)`) does O(N log N) Python-level work
+  for one step charge.
+- **Heap residency vs cumulative allocation.** `max_allocs` bounds the
+  *sum* of bytes ever requested from the counter, not the *live*
+  bytes. A loop that allocates and discards N MB per iteration will
+  exhaust an `max_allocs=N` budget after one iteration even though
+  Python's GC keeps memory bounded.
+- **Adversarial input outside Starlark's control.** A configuration
+  that calls a host-supplied builtin in a loop, where that builtin
+  blocks on I/O or holds a lock, is the host's problem to bound.
+
+## Always-on defences against the worst single allocation
+
+Independent of opt-in counters, the interpreter has soft caps that
+prevent the most common adversarial inputs from OOM-ing or hanging the
+host even when no `max_*` is set:
 
 - **`MAX_CONTAINER_ELEMENTS = 16M`** (`eval/limits.py`). Applied to
   every materializing operation: `list(iter)`, `tuple(iter)`,
@@ -103,23 +161,8 @@ These are *single-shot* defences — they bound the worst single
 allocation or call chain. They do **not** bound aggregate work across
 many smaller operations. A configuration that builds 100 lists of
 100,000 elements each in a `for` loop will succeed and consume
-~10M elements; a configuration that does this in a tight loop ten
+~10M elements; without `max_allocs`, a tight loop doing this ten
 million times will eventually OOM.
-
-## Stricter modes the host may want
-
-If the host needs the stricter "bounded CPU and memory" guarantee that
-both security reviewers assumed, two complementary mechanisms are
-appropriate (cost estimates in `security/cost-estimates.md`):
-
-1. **A step counter on the `Thread`**, charged on every statement and
-   loop iteration, configurable via a `max_steps` parameter.
-2. **A heap counter on the `Module`**, charged on every allocation,
-   configurable via a `max_alloc_bytes` parameter.
-
-Both would be **opt-in features**, not always-on, so configuration code
-that's known to be fast and small doesn't pay the per-instruction
-overhead.
 
 ## Reviewer-recommended host-side defence
 

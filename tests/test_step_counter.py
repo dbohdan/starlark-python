@@ -139,6 +139,16 @@ result = sorted([i for i in range(1000000)], key=k)
         starlark.exec_file(src, max_steps=10_000)
 
 
+def test_module_thread_exposed_for_cost_reporting():
+    """`module.thread.steps` is the documented way to read cost after a
+    successful exec_file. The Thread is attached for inspection only;
+    re-using it for another eval is unsupported."""
+    m = starlark.exec_file("x = sum([i for i in range(50)])\n")
+    assert m.thread is not None
+    assert m.thread.steps > 0
+    assert m.thread.allocs > 0
+
+
 def test_finite_program_completes_under_generous_cap():
     """A reasonable program runs to completion below a generous cap."""
     src = """

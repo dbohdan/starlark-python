@@ -13,15 +13,24 @@ from .mutability import Mutability
 
 
 class Module:
-    """A frozen-able container of module-global bindings."""
+    """A frozen-able container of module-global bindings.
 
-    __slots__ = ("globals", "mutability", "name", "predeclared")
+    `thread` is set by `starlark.exec_file` after evaluation finishes so
+    hosts can inspect resource-counter state (`thread.steps`,
+    `thread.allocs`) without having to drive the lower-level `eval_file`
+    API themselves.
+    """
+
+    __slots__ = ("globals", "mutability", "name", "predeclared", "thread")
 
     def __init__(self, name: str = "") -> None:
         self.name = name
         self.mutability = Mutability(name)
         self.globals: dict[str, Any] = {}
         self.predeclared: dict[str, Any] = {}
+        # Filled in by exec_file after evaluation; None for modules built
+        # outside the public API.
+        self.thread: Any = None
 
     def freeze(self) -> None:
         """Freezes the module's mutability token, making all owned values read-only."""

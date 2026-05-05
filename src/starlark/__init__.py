@@ -141,6 +141,9 @@ def exec_file(
     from .eval.builtins import with_mutability, with_thread
     with with_mutability(module.mutability), with_thread(thread):
         eval_file(file, thread)
+    # Expose the Thread so hosts can read `module.thread.steps` /
+    # `.allocs` for cost reporting.
+    module.thread = thread
     return module
 
 
