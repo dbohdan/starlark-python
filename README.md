@@ -104,10 +104,22 @@ reference's exact error wording for these checks; they are listed in
 
 ```sh
 uv sync           # install deps
-make test         # 369 tests, ~1s
+make test         # ~400 tests, ~2s
 make lint         # ruff
+make typecheck    # pyright
 make zipapp       # build ./starlark-python.pyz
 ```
+
+`tests/test_cross_validation.py` runs a curated set of programs under
+both this interpreter and the [starlark-go][starlark-go] CLI and asserts
+they produce identical output. To enable, install the go reference and
+make sure it's on `PATH`:
+
+```sh
+go install go.starlark.net/cmd/starlark@latest
+```
+
+[starlark-go]: https://github.com/google/starlark-go
 
 ## License
 

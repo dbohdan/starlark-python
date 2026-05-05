@@ -130,15 +130,11 @@ def b_str(x: Any = "") -> str:
     return str_starlark(x)
 
 
-def b_print(*args, sep: str = " ", end: str = "") -> None:
-    """`print` writes to stderr in the Java reference; we use stdout here.
-
-    Print currently has no side-channel; the evaluator can override.
-    """
+def b_print(*args, sep: str = " ", end: str = "\n") -> None:
+    """Starlark `print`. Writes to stderr to match the Java and Go references."""
+    import sys
     text = sep.join(str_starlark(a) for a in args)
-    if end:
-        text += end
-    print(text)
+    sys.stderr.write(text + end)
 
 
 def b_fail(*args, sep: str = " ") -> None:
