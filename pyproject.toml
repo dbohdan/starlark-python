@@ -5,6 +5,29 @@ description = "Pure-Python implementation of the Starlark configuration language
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
+keywords = [
+    "configuration",
+    "configuration-language",
+    "dsl",
+    "interpreter",
+    "language",
+    "parser",
+    "sandbox",
+    "starlark",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Software Development :: Interpreters",
+    "Typing :: Typed",
+]
 dependencies = []
 
 [project.optional-dependencies]
