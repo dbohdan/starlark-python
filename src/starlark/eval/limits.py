@@ -54,9 +54,7 @@ def check_repeat(factor: int, length: int, *, unit: str = "elements") -> None:
     n = factor * length
     if n > MAX_CONTAINER_ELEMENTS:
         if factor >= (1 << 31):
-            raise EvalError(
-                f"got {factor} for repeat, want value in signed 32-bit range"
-            )
+            raise EvalError(f"got {factor} for repeat, want value in signed 32-bit range")
         raise EvalError(f"excessive repeat ({length} * {factor} {unit})")
 
 

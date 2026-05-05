@@ -60,8 +60,8 @@ def test_string_repeat_rejected():
 def test_list_concat_rejected():
     src = (
         "x = [0] * (1 << 23)\n"  # 8M elements (under the cap)
-        "y = x + x\n"             # 16M (exactly at cap)
-        "z = y + y\n"             # 32M (over the cap)
+        "y = x + x\n"  # 16M (exactly at cap)
+        "z = y + y\n"  # 32M (over the cap)
     )
     with pytest.raises(EvalError, match="excessive capacity"):
         starlark.exec_file(src)

@@ -52,9 +52,11 @@ def _charge(n: int) -> None:
     # Local import to avoid a circular dependency at module load time
     # (builtins.py imports from values.py).
     from .builtins import _CURRENT_THREAD
+
     thread = _CURRENT_THREAD.get(None)
     if thread is not None:
         thread.add_allocs(n)
+
 
 # --------------------------------------------------------------- type names
 
@@ -166,6 +168,7 @@ class StarlarkList:
     def extend(self, items) -> None:
         self.mutability.check("list")
         from .limits import MAX_CONTAINER_ELEMENTS, check_container_size
+
         # Pre-check for known-size iterables to avoid OOM on hostile input.
         try:
             n = len(items)
@@ -567,6 +570,7 @@ def check_hashable(value: Any) -> None:
         return
     # User-defined Starlark functions are hashable by identity.
     from .function import StarlarkFunction
+
     if isinstance(value, StarlarkFunction):
         return
     raise EvalError(f"unhashable type: '{starlark_type(value)}'")
@@ -622,9 +626,7 @@ def less_than(a: Any, b: Any) -> bool:
         return (not a) and b
     # Reject bool vs non-bool numeric per the spec.
     if isinstance(a, bool) or isinstance(b, bool):
-        raise EvalError(
-            f"unsupported comparison: {starlark_type(a)} <=> {starlark_type(b)}"
-        )
+        raise EvalError(f"unsupported comparison: {starlark_type(a)} <=> {starlark_type(b)}")
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
         # Handle NaN: NaN > everything, NaN == NaN.
         a_nan = isinstance(a, float) and a != a
@@ -651,9 +653,7 @@ def less_than(a: Any, b: Any) -> bool:
     # Preserve operand order so `min(string, int)` differs from
     # `min(int, string)` in the error message; the spec uses `<=>` to indicate
     # this is a generic ordered-comparison error, not specifically `<`.
-    raise EvalError(
-        f"unsupported comparison: {starlark_type(a)} <=> {starlark_type(b)}"
-    )
+    raise EvalError(f"unsupported comparison: {starlark_type(a)} <=> {starlark_type(b)}")
 
 
 # --------------------------------------------------------------- repr
@@ -667,11 +667,11 @@ def repr_starlark(value: Any, _seen: set | None = None, _depth: int = 0) -> str:
     # `x = []` then `for i in range(N): x = [x]`). The cycle-detection set
     # already handles cyclic references; this catches the linear-deep case.
     from .limits import MAX_NESTING_DEPTH
+
     if _depth > MAX_NESTING_DEPTH:
         from .errors import EvalError as _EE
-        raise _EE(
-            f"value too deeply nested for repr (>{MAX_NESTING_DEPTH} levels)"
-        )
+
+        raise _EE(f"value too deeply nested for repr (>{MAX_NESTING_DEPTH} levels)")
     # Cycle detection for mutable containers. Render the recursive
     # reference as a bare `...` so the surrounding container's brackets are
     # preserved (matches Java's CycleDetector behavior).
@@ -701,8 +701,7 @@ def repr_starlark(value: Any, _seen: set | None = None, _depth: int = 0) -> str:
         return (
             "{"
             + ", ".join(
-                f"{repr_starlark(k, _seen, _depth + 1)}: "
-                f"{repr_starlark(v, _seen, _depth + 1)}"
+                f"{repr_starlark(k, _seen, _depth + 1)}: {repr_starlark(v, _seen, _depth + 1)}"
                 for k, v in value.items()
             )
             + "}"
@@ -716,8 +715,10 @@ def repr_starlark(value: Any, _seen: set | None = None, _depth: int = 0) -> str:
             return f"range({value.start}, {value.stop})"
         return f"range({value.start}, {value.stop}, {value.step})"
     if isinstance(value, BuiltinFunction):
-        return f"<built-in function {value.name}>" if not value.self_repr else (
-            f"<built-in method {value.name.split('.')[-1]} of {value.self_repr} value>"
+        return (
+            f"<built-in function {value.name}>"
+            if not value.self_repr
+            else (f"<built-in method {value.name.split('.')[-1]} of {value.self_repr} value>")
         )
     # User-defined functions — let their __repr__ handle it.
     return repr(value)
@@ -755,6 +756,7 @@ def _float_repr(x: float) -> str:
     if "e" in s or "E" in s:
         if 1e-3 <= abs(x) < 1e17:
             from decimal import Decimal
+
             d = Decimal(s)
             s = format(d, "f")
             if "." not in s:
@@ -768,6 +770,7 @@ def _float_repr(x: float) -> str:
 
 def _is_neg_zero(x: float) -> bool:
     import math
+
     return x == 0.0 and math.copysign(1.0, x) == -1.0
 
 

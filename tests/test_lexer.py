@@ -216,8 +216,16 @@ def test_tab_indent_reports_error():
     [
         ("True", [TokenKind.IDENTIFIER, TokenKind.NEWLINE, TokenKind.EOF]),
         ("None", [TokenKind.IDENTIFIER, TokenKind.NEWLINE, TokenKind.EOF]),
-        ("a:b", [TokenKind.IDENTIFIER, TokenKind.COLON, TokenKind.IDENTIFIER,
-                 TokenKind.NEWLINE, TokenKind.EOF]),
+        (
+            "a:b",
+            [
+                TokenKind.IDENTIFIER,
+                TokenKind.COLON,
+                TokenKind.IDENTIFIER,
+                TokenKind.NEWLINE,
+                TokenKind.EOF,
+            ],
+        ),
     ],
 )
 def test_misc(src, expected):

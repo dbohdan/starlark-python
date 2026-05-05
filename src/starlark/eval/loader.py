@@ -41,6 +41,7 @@ class FileLoader:
         if name in self._cache:
             return self._cache[name]
         from pathlib import Path
+
         for base in self._search_paths:
             p = Path(base) / name
             if p.is_file():
@@ -64,9 +65,7 @@ def perform_load(loader: Loader | None, module_name: str, bindings: list) -> dic
     out: dict[str, Any] = {}
     for local_name, original_name in bindings:
         if original_name not in other.globals:
-            raise EvalError(
-                f"load: name {original_name!r} not found in module {module_name!r}"
-            )
+            raise EvalError(f"load: name {original_name!r} not found in module {module_name!r}")
         out[local_name] = other.globals[original_name]
     return out
 

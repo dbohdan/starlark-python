@@ -83,7 +83,7 @@ def test_encode_set_as_array():
 def test_encode_path_in_error():
     # Nested error location should include the path through the value.
     with pytest.raises(EvalError, match="at list index 1"):
-        expr('json.encode([1, len])')
+        expr("json.encode([1, len])")
 
 
 # ---------------------------------------------------------------- decode
@@ -135,7 +135,7 @@ def test_decode_rejects_control_chars_in_string():
     # Literal newline inside string is invalid JSON.
     src = '"a\nb"'
     with pytest.raises(EvalError, match="control character"):
-        expr(f'json.decode({src!r})')
+        expr(f"json.decode({src!r})")
 
 
 def test_decode_rejects_dangling_escape():
@@ -151,7 +151,7 @@ def test_decode_rejects_invalid_unicode_escape():
 def test_decode_handles_surrogate_pair():
     # 😹 == U+1F639 (😹).
     v = expr(r'json.decode("\"\\uD83D\\uDE39\"")')
-    assert v == "\U0001F639"
+    assert v == "\U0001f639"
 
 
 def test_decode_rejects_unpaired_surrogate():
@@ -177,7 +177,7 @@ def test_decode_invalid_number():
 
 
 def test_encode_indent_basic():
-    out = expr('json.encode_indent([1, 2, 3])')
+    out = expr("json.encode_indent([1, 2, 3])")
     assert out == "[\n\t1,\n\t2,\n\t3\n]"
 
 

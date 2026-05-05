@@ -131,9 +131,7 @@ def _call_method(receiver: Any, name: str, fn) -> Any:
         except Exception as e:
             last_err = e
             continue
-    raise AssertionError(
-        f"could not call {name} on {_describe(receiver)}: last error {last_err!r}"
-    )
+    raise AssertionError(f"could not call {name} on {_describe(receiver)}: last error {last_err!r}")
 
 
 def _allowed_or_raises(receiver: Any, name: str, fn) -> None:
@@ -216,9 +214,7 @@ def test_evaluating_each_method_returns_allowed_types():
     with with_mutability(mod.mutability):
         for src in cases:
             value = starlark.eval(src)
-            assert _is_allowed(value), (
-                f"`{src}` returned {_describe(value)}: {value!r}"
-            )
+            assert _is_allowed(value), f"`{src}` returned {_describe(value)}: {value!r}"
 
 
 @pytest.mark.parametrize(
@@ -231,6 +227,7 @@ def test_wrappers_are_distinct_from_python_types(name: str):
     sandbox might confuse a leaked Python list with a StarlarkList.
     """
     from starlark.eval import values
+
     cls = getattr(values, name)
     assert not issubclass(cls, list)
     assert not issubclass(cls, dict)

@@ -21,8 +21,8 @@ class StarlarkFunction:
 
     name: str
     params: list[ast.Parameter]
-    body_stmts: list[ast.Statement] | None   # for def
-    body_expr: ast.Expression | None         # for lambda
+    body_stmts: list[ast.Statement] | None  # for def
+    body_expr: ast.Expression | None  # for lambda
     # The AST node this function was created from. Used to detect recursion
     # by *syntactic* identity (two closures from the same lambda are
     # considered the same function for recursion-check purposes — see the
@@ -98,18 +98,14 @@ def bind_arguments(
         locals_[star_param] = tuple(extra_positional)
     elif extra_positional and seen_star:
         # Bare `*` separator with no name; extras still become an error.
-        raise EvalError(
-            f"function {fn.name} got unexpected positional arguments"
-        )
+        raise EvalError(f"function {fn.name} got unexpected positional arguments")
 
     # Bind keyword arguments.
     leftover_kw: dict[str, Any] = {}
     for kname, kvalue in keyword.items():
         if kname in positional_names or kname in keyword_only:
             if kname in locals_:
-                raise EvalError(
-                    f"function {fn.name} got multiple values for argument {kname!r}"
-                )
+                raise EvalError(f"function {fn.name} got multiple values for argument {kname!r}")
             locals_[kname] = kvalue
         else:
             leftover_kw[kname] = kvalue
@@ -117,14 +113,13 @@ def bind_arguments(
     if starstar_param is not None:
         from .mutability import Mutability
         from .values import Dict  # local import to avoid cycle
+
         # The kwargs dict is mutable but local to the call.
         m = Mutability("**kwargs")
         locals_[starstar_param] = Dict(leftover_kw, m)
     elif leftover_kw:
         names = ", ".join(sorted(leftover_kw))
-        raise EvalError(
-            f"function {fn.name} got unexpected keyword argument(s): {names}"
-        )
+        raise EvalError(f"function {fn.name} got unexpected keyword argument(s): {names}")
 
     # Apply defaults for any missing optional params.
     for p in fn.params:
@@ -136,9 +131,7 @@ def bind_arguments(
     for p in fn.params:
         if isinstance(p, ast.MandatoryParameter):
             if p.name.name not in locals_:
-                raise EvalError(
-                    f"function {fn.name} missing required argument {p.name.name!r}"
-                )
+                raise EvalError(f"function {fn.name} missing required argument {p.name.name!r}")
 
     return locals_
 

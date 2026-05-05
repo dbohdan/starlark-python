@@ -160,14 +160,7 @@ def test_lambda():
 
 
 def test_if_elif_else():
-    [stmt] = parse_or_raise(
-        "if x:\n"
-        "    a()\n"
-        "elif y:\n"
-        "    b()\n"
-        "else:\n"
-        "    c()\n"
-    )
+    [stmt] = parse_or_raise("if x:\n    a()\nelif y:\n    b()\nelse:\n    c()\n")
     assert isinstance(stmt, ast.IfStatement)
     assert len(stmt.body) == 1
     assert len(stmt.else_block) == 1
@@ -266,11 +259,6 @@ def test_empty_tuple():
 
 
 def test_nested_function():
-    [stmt] = parse_or_raise(
-        "def outer():\n"
-        "    def inner():\n"
-        "        return 1\n"
-        "    return inner\n"
-    )
+    [stmt] = parse_or_raise("def outer():\n    def inner():\n        return 1\n    return inner\n")
     assert isinstance(stmt, ast.DefStatement)
     assert isinstance(stmt.body[0], ast.DefStatement)

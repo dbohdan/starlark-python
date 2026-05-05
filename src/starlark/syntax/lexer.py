@@ -82,9 +82,7 @@ class Lexer:
     def _error(self, message: str, pos: int | None = None) -> None:
         if pos is None:
             pos = self._pos
-        self.errors.append(
-            StarlarkSyntaxError(self.locs.position(pos), message)
-        )
+        self.errors.append(StarlarkSyntaxError(self.locs.position(pos), message))
 
     # -------------------------------------------------------------- scanning
 
@@ -334,7 +332,7 @@ class Lexer:
         # Caller has already consumed the first char.
         while self._pos < n and _is_id_cont(self._source[self._pos]):
             self._pos += 1
-        text = self._source[start:self._pos]
+        text = self._source[start : self._pos]
         kw = KEYWORDS.get(text)
         if kw is not None:
             return Token(kw, start, self._pos)
@@ -353,9 +351,7 @@ class Lexer:
             triple = True
         return self._scan_string_body(quote, raw=raw, triple=triple, start=start)
 
-    def _scan_string_body(
-        self, quote: str, *, raw: bool, triple: bool, start: int
-    ) -> Token:
+    def _scan_string_body(self, quote: str, *, raw: bool, triple: bool, start: int) -> Token:
         out: list[str] = []
         src = self._source
         n = len(src)

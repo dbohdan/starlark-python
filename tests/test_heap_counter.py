@@ -189,6 +189,7 @@ total = sum(result)
 def test_negative_delta_rejected():
     """`add_allocs` is charge-only; negative deltas are a programming error."""
     from starlark.eval.module import Module
+
     t = Thread(module=Module("<test>"))
     with pytest.raises(ValueError, match="negative delta"):
         t.add_allocs(-1)
@@ -202,6 +203,7 @@ def test_steps_and_allocs_independent():
         starlark.exec_file(src, max_steps=1_000_000, max_allocs=200)
     # Generous alloc cap, tight step cap — step fires first.
     from starlark import StepLimitExceeded
+
     with pytest.raises(StepLimitExceeded):
         starlark.exec_file(src, max_steps=10, max_allocs=10_000_000)
 

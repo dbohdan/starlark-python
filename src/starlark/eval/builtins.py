@@ -38,9 +38,7 @@ from .values import (
 # from `_CURRENT_MUTABILITY`; builtins that call back into Starlark (e.g.,
 # `sorted(key=fn)`) read the current `Thread` from `_CURRENT_THREAD`. The
 # evaluator sets both around each `call()` and `eval_file()`.
-_CURRENT_MUTABILITY: ContextVar[Mutability] = ContextVar(
-    "starlark.current_mutability"
-)
+_CURRENT_MUTABILITY: ContextVar[Mutability] = ContextVar("starlark.current_mutability")
 _CURRENT_THREAD: ContextVar[Any] = ContextVar("starlark.current_thread")
 
 
@@ -87,6 +85,7 @@ def _call_starlark(fn: Any, *args: Any) -> Any:
             return fn.impl(*args)
         raise EvalError("cannot call user-defined function from this context")
     from .evaluator import call as _call
+
     return _call(fn, list(args), {}, thread)
 
 
@@ -95,6 +94,7 @@ def _check_callable(name: str, value: Any) -> None:
     if value is None:
         return
     from .function import StarlarkFunction
+
     if isinstance(value, (BuiltinFunction, StarlarkFunction)):
         return
     raise EvalError(
@@ -176,6 +176,7 @@ def b_str(x: Any = "") -> str:
 def b_print(*args, sep: str = " ", end: str = "\n") -> None:
     """Starlark `print`. Writes to stderr to match the Java and Go references."""
     import sys
+
     text = sep.join(str_starlark(a) for a in args)
     sys.stderr.write(text + end)
 
@@ -212,17 +213,13 @@ def b_int(x: Any, base: Any = None) -> int:
     if isinstance(x, str):
         # Default: base 10. Pass explicit base=0 to auto-detect from prefix.
         return _int_from_string(x, 10)
-    raise EvalError(
-        f"got value of type '{starlark_type(x)}', want 'string, bool, int, or float'"
-    )
+    raise EvalError(f"got value of type '{starlark_type(x)}', want 'string, bool, int, or float'")
 
 
 def _int_from_string(text: str, base: int) -> int:
     """Mirror Bazel's int() string parser, including its base/prefix rules."""
     if base != 0 and not (2 <= base <= 36):
-        raise EvalError(
-            f"invalid base {base} (want 2 <= base <= 36)"
-        )
+        raise EvalError(f"invalid base {base} (want 2 <= base <= 36)")
     if not text:
         raise EvalError("empty string")
     # Note: do not strip whitespace; the spec rejects " 1" and "1 ".
@@ -244,9 +241,7 @@ def _int_from_string(text: str, base: int) -> int:
         elif body.startswith(("0b", "0B")):
             base, body = 2, body[2:]
         elif len(body) > 1 and body[0] == "0" and any(c != "0" for c in body):
-            raise EvalError(
-                f'cannot infer base when string begins with a 0: "{text}"'
-            )
+            raise EvalError(f'cannot infer base when string begins with a 0: "{text}"')
         else:
             base = 10
     else:
@@ -289,9 +284,7 @@ def b_float(x: Any = 0.0) -> float:
         if f == float("inf") or f == float("-inf"):
             raise EvalError("floating-point number too large")
         return f
-    raise EvalError(
-        f"got value of type '{starlark_type(x)}', want 'string, bool, int, or float'"
-    )
+    raise EvalError(f"got value of type '{starlark_type(x)}', want 'string, bool, int, or float'")
 
 
 def b_abs(x: Any) -> Any:
@@ -376,9 +369,7 @@ def b_range(*args) -> Range:
 def b_enumerate(x: Any, start: int = 0) -> StarlarkList:
     if not _is_int(start):
         raise EvalError("enumerate() start must be int")
-    return StarlarkList(
-        [(i + start, v) for i, v in enumerate(_drain(x))], _mut()
-    )
+    return StarlarkList([(i + start, v) for i, v in enumerate(_drain(x))], _mut())
 
 
 def b_zip(*args) -> StarlarkList:
@@ -434,9 +425,7 @@ def _min_max(args, key, *, _is_min: bool) -> Any:
         try:
             items = _drain(args[0])
         except EvalError:
-            raise EvalError(
-                f"type '{starlark_type(args[0])}' is not iterable"
-            ) from None
+            raise EvalError(f"type '{starlark_type(args[0])}' is not iterable") from None
         if not items:
             raise EvalError("expected at least one item")
     else:
@@ -491,6 +480,7 @@ def b_hasattr(obj: Any, name: Any) -> bool:
     if isinstance(fields, dict) and name in fields:
         return True
     from .methods import get_method
+
     return get_method(obj, name) is not None
 
 
@@ -503,6 +493,7 @@ def b_getattr(obj: Any, name: Any, *defaults) -> Any:
     if isinstance(fields, dict) and name in fields:
         return fields[name]
     from .methods import get_method
+
     m = get_method(obj, name)
     if m is not None:
         return m
@@ -513,6 +504,7 @@ def b_getattr(obj: Any, name: Any, *defaults) -> Any:
 
 def b_dir(obj: Any) -> StarlarkList:
     from .methods import _DICT_METHODS, _LIST_METHODS, _SET_METHODS, _STRING_METHODS
+
     names: list[str] = []
     if isinstance(obj, str):
         names = sorted(_STRING_METHODS.keys())
@@ -571,6 +563,7 @@ def make_universal() -> dict[str, Any]:
     for name, fn in pairs:
         table[name] = BuiltinFunction(name=name, impl=fn)
     from .json_module import make_module
+
     table["json"] = make_module()
     return table
 

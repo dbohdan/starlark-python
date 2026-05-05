@@ -41,14 +41,10 @@ def s_startswith(s: str, prefix: Any, start: Any = None, end: Any = None) -> boo
     if isinstance(prefix, tuple):
         for i, p in enumerate(prefix):
             if not isinstance(p, str):
-                raise EvalError(
-                    f"at index {i} of sub, got element of type {_st(p)}, want string"
-                )
+                raise EvalError(f"at index {i} of sub, got element of type {_st(p)}, want string")
         return any(sub.startswith(p) for p in prefix)
     if not isinstance(prefix, str):
-        raise EvalError(
-            f"got value of type '{_st(prefix)}', want 'string or tuple'"
-        )
+        raise EvalError(f"got value of type '{_st(prefix)}', want 'string or tuple'")
     return sub.startswith(prefix)
 
 
@@ -58,14 +54,10 @@ def s_endswith(s: str, suffix: Any, start: Any = None, end: Any = None) -> bool:
     if isinstance(suffix, tuple):
         for i, p in enumerate(suffix):
             if not isinstance(p, str):
-                raise EvalError(
-                    f"at index {i} of sub, got element of type {_st(p)}, want string"
-                )
+                raise EvalError(f"at index {i} of sub, got element of type {_st(p)}, want string")
         return any(sub.endswith(p) for p in suffix)
     if not isinstance(suffix, str):
-        raise EvalError(
-            f"got value of type '{_st(suffix)}', want 'string or tuple'"
-        )
+        raise EvalError(f"got value of type '{_st(suffix)}', want 'string or tuple'")
     return sub.endswith(suffix)
 
 
@@ -168,6 +160,7 @@ def s_rstrip(s: str, chars: Any = None) -> str:
 
 def s_split(s: str, sep: Any = None, maxsplit: Any = None) -> StarlarkList:
     from .builtins import _mut
+
     if sep is not None:
         if not isinstance(sep, str):
             raise EvalError(f"got value of type '{type(sep).__name__}', want 'string or None'")
@@ -179,6 +172,7 @@ def s_split(s: str, sep: Any = None, maxsplit: Any = None) -> StarlarkList:
 
 def s_rsplit(s: str, sep: Any = None, maxsplit: Any = None) -> StarlarkList:
     from .builtins import _mut
+
     if sep is not None:
         if not isinstance(sep, str):
             raise EvalError(f"got value of type '{type(sep).__name__}', want 'string or None'")
@@ -190,14 +184,13 @@ def s_rsplit(s: str, sep: Any = None, maxsplit: Any = None) -> StarlarkList:
 
 def s_splitlines(s: str, keepends: bool = False) -> StarlarkList:
     from .builtins import _mut
+
     return StarlarkList(s.splitlines(keepends), _mut())
 
 
 def s_partition(s: str, sep: str) -> tuple:
     if not isinstance(sep, str):
-        raise EvalError(
-            f"got value of type '{type(sep).__name__}', want 'string'"
-        )
+        raise EvalError(f"got value of type '{type(sep).__name__}', want 'string'")
     if not sep:
         raise EvalError("empty separator")
     return s.partition(sep)
@@ -205,9 +198,7 @@ def s_partition(s: str, sep: str) -> tuple:
 
 def s_rpartition(s: str, sep: str) -> tuple:
     if not isinstance(sep, str):
-        raise EvalError(
-            f"got value of type '{type(sep).__name__}', want 'string'"
-        )
+        raise EvalError(f"got value of type '{type(sep).__name__}', want 'string'")
     if not sep:
         raise EvalError("empty separator")
     return s.rpartition(sep)
@@ -219,11 +210,10 @@ def s_rpartition(s: str, sep: str) -> tuple:
 def s_join(s: str, iterable: Any) -> str:
     parts: list[str] = []
     from .values import starlark_type
+
     for x in iterable:
         if not isinstance(x, str):
-            raise EvalError(
-                f"join() requires a sequence of strings (got {starlark_type(x)})"
-            )
+            raise EvalError(f"join() requires a sequence of strings (got {starlark_type(x)})")
         parts.append(x)
     return s.join(parts)
 
@@ -243,13 +233,13 @@ def s_replace(s: str, old: Any, new: Any, count: Any = -1) -> str:
 def s_removeprefix(s: str, prefix: Any) -> str:
     if not isinstance(prefix, str):
         raise EvalError(f"got value of type '{_st(prefix)}', want 'string'")
-    return s[len(prefix):] if s.startswith(prefix) else s
+    return s[len(prefix) :] if s.startswith(prefix) else s
 
 
 def s_removesuffix(s: str, suffix: Any) -> str:
     if not isinstance(suffix, str):
         raise EvalError(f"got value of type '{_st(suffix)}', want 'string'")
-    return s[:-len(suffix)] if suffix and s.endswith(suffix) else s
+    return s[: -len(suffix)] if suffix and s.endswith(suffix) else s
 
 
 # ---------------------------------------------------------------- predicate
@@ -294,6 +284,7 @@ def s_istitle(s: str) -> bool:
 
 def s_elems(s: str) -> StarlarkList:
     from .builtins import _mut
+
     return StarlarkList(list(s), _mut())
 
 
@@ -359,9 +350,7 @@ def _format_impl(template: str, args: tuple, kwargs: dict) -> str:
                     )
                 seen_implicit = True
                 if auto_index >= len(args):
-                    raise EvalError(
-                        f"No replacement found for index {auto_index}"
-                    )
+                    raise EvalError(f"No replacement found for index {auto_index}")
                 value = args[auto_index]
                 auto_index += 1
             elif _looks_like_int_field(spec):

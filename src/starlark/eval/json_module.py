@@ -76,8 +76,7 @@ def _encode_value(value: Any, out: list[str], path: str, depth: int = 0) -> None
             raise EvalError(f"{path}cannot encode non-finite float nan")
         if math.isinf(value):
             raise EvalError(
-                f"{path}cannot encode non-finite float "
-                + ("inf" if value > 0 else "-inf")
+                f"{path}cannot encode non-finite float " + ("inf" if value > 0 else "-inf")
             )
         out.append(_encode_float(value))
         return
@@ -91,18 +90,14 @@ def _encode_value(value: Any, out: list[str], path: str, depth: int = 0) -> None
             if not first:
                 out.append(",")
             first = False
-            _encode_value(
-                item, out, f"{path}at {_seq_label(value)} index {i}: ", depth + 1
-            )
+            _encode_value(item, out, f"{path}at {_seq_label(value)} index {i}: ", depth + 1)
         out.append("]")
         return
     if isinstance(value, Dict):
         keys: list[str] = []
         for k in value:
             if not isinstance(k, str):
-                raise EvalError(
-                    f"{path}dict has {starlark_type(k)} key, want string"
-                )
+                raise EvalError(f"{path}dict has {starlark_type(k)} key, want string")
             keys.append(k)
         # Spec: sort keys lexicographically (key order, not insertion order).
         keys.sort()
@@ -125,9 +120,7 @@ def _encode_value(value: Any, out: list[str], path: str, depth: int = 0) -> None
         # Reject non-string field names.
         for k in fields:
             if not isinstance(k, str):
-                raise EvalError(
-                    f"{path}struct has {starlark_type(k)} key, want string"
-                )
+                raise EvalError(f"{path}struct has {starlark_type(k)} key, want string")
         first = True
         for k in keys:
             if not first:
@@ -135,9 +128,7 @@ def _encode_value(value: Any, out: list[str], path: str, depth: int = 0) -> None
             first = False
             out.append(_encode_string(k))
             out.append(":")
-            _encode_value(
-                fields[k], out, f"{path}in struct field .{k}: ", depth + 1
-            )
+            _encode_value(fields[k], out, f"{path}in struct field .{k}: ", depth + 1)
         out.append("}")
         return
     raise EvalError(f"{path}cannot encode {starlark_type(value)} as JSON")
@@ -244,7 +235,7 @@ class _Decoder:
         if not self._eof():
             raise EvalError(
                 f"unexpected trailing data at offset {self.pos}: "
-                f"{self.source[self.pos:self.pos+8]!r}"
+                f"{self.source[self.pos : self.pos + 8]!r}"
             )
         return v
 
@@ -359,9 +350,7 @@ class _Decoder:
                     raise EvalError(f"invalid escape \\{esc} in JSON string")
                 continue
             if ord(c) < 0x20:
-                raise EvalError(
-                    f"unescaped control character U+{ord(c):04X} in JSON string"
-                )
+                raise EvalError(f"unescaped control character U+{ord(c):04X} in JSON string")
             out.append(c)
 
     def _unicode_escape(self) -> str:
@@ -432,9 +421,7 @@ class _Decoder:
             while True:
                 self._skip_ws()
                 if self._peek() != '"':
-                    raise EvalError(
-                        f"expected string key in object at offset {self.pos}"
-                    )
+                    raise EvalError(f"expected string key in object at offset {self.pos}")
                 key = self._string()
                 self._skip_ws()
                 self._expect(":")
@@ -531,9 +518,7 @@ def encode_indent(value: Any, *, prefix: str = "", indent: str = "\t") -> str:
 def indent(source: Any, *, prefix: str = "", indent: str = "\t") -> str:
     """Re-formats a JSON string with indentation."""
     if not isinstance(source, str):
-        raise EvalError(
-            f"json.indent: requires a string, got {starlark_type(source)}"
-        )
+        raise EvalError(f"json.indent: requires a string, got {starlark_type(source)}")
     if not isinstance(prefix, str) or not isinstance(indent, str):
         raise EvalError("json.indent: prefix and indent must be strings")
     decoded = _Decoder(source).parse()

@@ -62,6 +62,7 @@ def eval(
     )
     # Wrap as an expression statement to evaluate via eval_file.
     from .syntax import ast as _ast
+
     file = _ast.StarlarkFile(
         file=filename,
         statements=[_ast.ExpressionStatement(start=expr.start, end=expr.end, expression=expr)],
@@ -72,6 +73,7 @@ def eval(
         raise StarlarkSyntaxException(file.errors)
     from .eval.builtins import with_mutability, with_thread
     from .eval.evaluator import Frame, _eval_expr
+
     frame = Frame(locals_=module.globals, function_name="<expr>", module=module)
     thread.frames.append(frame)
     try:
@@ -139,6 +141,7 @@ def exec_file(
         on_max_allocs=on_max_allocs,
     )
     from .eval.builtins import with_mutability, with_thread
+
     with with_mutability(module.mutability), with_thread(thread):
         eval_file(file, thread)
     # Expose the Thread so hosts can read `module.thread.steps` /

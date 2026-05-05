@@ -80,6 +80,7 @@ def _report(msg: str) -> None:
 
 def b_assert_(cond: Any, msg: Any = "assertion failed") -> None:
     from .values import truth
+
     if not truth(cond):
         _report(f"assert_: {msg}")
 
@@ -100,13 +101,9 @@ def b_assert_fails(fn: Any, want_error: Any) -> None:
         _call_starlark(fn)
     except EvalError as e:
         if not pattern.search(e.message):
-            _report(
-                f"assert_fails: regex {want_error!r} did not match error: {e.message}"
-            )
+            _report(f"assert_fails: regex {want_error!r} did not match error: {e.message}")
         return
-    _report(
-        f"assert_fails: evaluation succeeded unexpectedly (want match for {want_error!r})"
-    )
+    _report(f"assert_fails: evaluation succeeded unexpectedly (want match for {want_error!r})")
 
 
 # ---------------------------------------------------------------- struct
@@ -129,9 +126,7 @@ class Struct:
         return "struct" if self._frozen else "mutablestruct"
 
     def __repr__(self) -> str:
-        body = ", ".join(
-            f"{k} = {repr_starlark(v)}" for k, v in self.fields.items()
-        )
+        body = ", ".join(f"{k} = {repr_starlark(v)}" for k, v in self.fields.items())
         prefix = "struct" if self._frozen else "mutablestruct"
         return f"{prefix}({body})"
 
@@ -166,6 +161,7 @@ def b_freeze(*args) -> Any:
         # values it owns become read-only. Used by the conformance suite
         # to test frozen-state behavior.
         from .builtins import _CURRENT_MUTABILITY
+
         m = _CURRENT_MUTABILITY.get(None)
         if m is not None:
             m.freeze()
@@ -173,6 +169,7 @@ def b_freeze(*args) -> Any:
     x = args[0]
     if hasattr(x, "mutability"):
         from .mutability import Mutability
+
         m = Mutability(x.mutability.name)
         m.freeze()
         x.mutability = m

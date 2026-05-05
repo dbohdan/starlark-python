@@ -155,9 +155,9 @@ def test_nested_exec_file_within_a_thread():
     def b_inner(code):
         return host_eval(current_thread(), code)
 
-    src = '''
+    src = """
 inner = inner_fn("x = 7\\n")
-'''
+"""
     pre = {
         "inner_fn": BuiltinFunction(name="inner_fn", impl=b_inner),
     }

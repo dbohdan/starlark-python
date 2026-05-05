@@ -40,16 +40,14 @@ def test_simple_global_assignment():
     for i in find_idents(f.statements):
         if isinstance(i.binding, Binding):
             by_name.setdefault(i.name, []).append(i)
-    assert all(b.binding is not None and b.binding.scope == Scope.UNIVERSAL for b in by_name["print"])
+    assert all(
+        b.binding is not None and b.binding.scope == Scope.UNIVERSAL for b in by_name["print"]
+    )
     assert all(b.binding is not None and b.binding.scope == Scope.GLOBAL for b in by_name["x"])
 
 
 def test_function_locals():
-    f = parse_and_resolve(
-        "def f(x):\n"
-        "    y = x + 1\n"
-        "    return y\n"
-    )
+    f = parse_and_resolve("def f(x):\n    y = x + 1\n    return y\n")
     [def_stmt] = f.statements
     assert isinstance(def_stmt, ast.DefStatement)
     assert set(def_stmt.locals) == {"x", "y"}
@@ -58,11 +56,7 @@ def test_function_locals():
 
 def test_closure_freevars():
     f = parse_and_resolve(
-        "def outer():\n"
-        "    a = 1\n"
-        "    def inner():\n"
-        "        return a\n"
-        "    return inner\n"
+        "def outer():\n    a = 1\n    def inner():\n        return a\n    return inner\n"
     )
     outer = f.statements[0]
     assert isinstance(outer, ast.DefStatement)
@@ -98,9 +92,7 @@ def test_default_after_nondefault():
     f = parse(src)
     locs = Lexer(src).locs
     resolve(f, locs)
-    assert any(
-        "non-default parameter follows default" in e.message for e in f.errors
-    )
+    assert any("non-default parameter follows default" in e.message for e in f.errors)
 
 
 def test_reassign_universal_is_error():
@@ -112,21 +104,14 @@ def test_reassign_universal_is_error():
 
 
 def test_for_loop_var_is_local():
-    f = parse_and_resolve(
-        "def f(xs):\n"
-        "    for i in xs:\n"
-        "        print(i)\n"
-    )
+    f = parse_and_resolve("def f(xs):\n    for i in xs:\n        print(i)\n")
     def_stmt = f.statements[0]
     assert isinstance(def_stmt, ast.DefStatement)
     assert "i" in def_stmt.locals
 
 
 def test_comprehension_scope():
-    f = parse_and_resolve(
-        "result = [x*2 for x in xs]\n"
-        "xs = [1, 2, 3]\n"
-    )
+    f = parse_and_resolve("result = [x*2 for x in xs]\nxs = [1, 2, 3]\n")
     # `x` should not pollute module globals.
     assert "x" not in f.globals
     assert "result" in f.globals

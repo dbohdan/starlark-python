@@ -170,6 +170,7 @@ class Thread:
         # Capped to defuse stack-overflow on deeply nested values constructed
         # at runtime (e.g. `for i in range(N): x = [x]` with large N).
         from .limits import MAX_NESTING_DEPTH
+
         self.depth = 0
         self.max_depth = max_depth if max_depth is not None else MAX_NESTING_DEPTH
         # CPU-bound counter. `steps` is monotonic; `max_steps=None` disables
@@ -206,8 +207,7 @@ class Thread:
                 self.on_max_steps = None
                 cb(self)
             raise StepLimitExceeded(
-                f"Starlark computation cancelled: too many steps "
-                f"({self.steps} > {self.max_steps})"
+                f"Starlark computation cancelled: too many steps ({self.steps} > {self.max_steps})"
             )
 
     def add_allocs(self, n: int) -> None:
@@ -303,6 +303,7 @@ def _exec_stmt(stmt, frame: Frame, thread: Thread) -> None:
         return
     if isinstance(stmt, ast.LoadStatement):
         from .loader import perform_load
+
         bindings = [(b.local.name, b.original.name) for b in stmt.bindings]
         results = perform_load(thread.loader, stmt.module.value, bindings)
         for k, v in results.items():
@@ -324,11 +325,16 @@ def _exec_assign(stmt: ast.AssignmentStatement, frame: Frame, thread: Thread) ->
     if isinstance(current, StarlarkList) and stmt.op == TokenKind.PLUS:
         current.extend(_iterate(rhs))
         return
-    if isinstance(current, StarlarkSet) and isinstance(rhs, StarlarkSet) and stmt.op in (
-        TokenKind.PIPE,
-        TokenKind.AMPERSAND,
-        TokenKind.MINUS,
-        TokenKind.CARET,
+    if (
+        isinstance(current, StarlarkSet)
+        and isinstance(rhs, StarlarkSet)
+        and stmt.op
+        in (
+            TokenKind.PIPE,
+            TokenKind.AMPERSAND,
+            TokenKind.MINUS,
+            TokenKind.CARET,
+        )
     ):
         _set_inplace(current, rhs, stmt.op)
         return
@@ -414,13 +420,9 @@ def _assign_to_target(target, value: Any, frame: Frame, thread: Thread) -> None:
                 f"(want {n_targets}-element sequence)"
             ) from None
         if len(items) < n_targets:
-            raise EvalError(
-                f"too few values to unpack (got {len(items)}, want {n_targets})"
-            )
+            raise EvalError(f"too few values to unpack (got {len(items)}, want {n_targets})")
         if len(items) > n_targets:
-            raise EvalError(
-                f"too many values to unpack (got {len(items)}, want {n_targets})"
-            )
+            raise EvalError(f"too many values to unpack (got {len(items)}, want {n_targets})")
         for sub, v in zip(target.elements, items, strict=True):
             _assign_to_target(sub, v, frame, thread)
         return
@@ -486,9 +488,7 @@ def _eval_expr_inner(expr, frame: Frame, thread: Thread) -> Any:
             check_hashable(k)
             v = _eval_expr(entry.value, frame, thread)
             if k in d:
-                raise EvalError(
-                    f"dictionary expression has duplicate key: {repr_starlark(k)}"
-                )
+                raise EvalError(f"dictionary expression has duplicate key: {repr_starlark(k)}")
             d[k] = v
         return d
     if isinstance(expr, ast.IndexExpression):
@@ -687,6 +687,7 @@ def _charge_thread_alloc(n: int) -> None:
     on every binary op. Both helpers do the same thing; either is fine.
     """
     from .builtins import _CURRENT_THREAD
+
     thread = _CURRENT_THREAD.get(None)
     if thread is not None:
         thread.add_allocs(n)
@@ -844,9 +845,7 @@ def _shift_left(a: Any, b: Any) -> Any:
         if b > _SHIFT_LIMIT:
             raise EvalError(f"shift count too large: {b}")
         return a << b
-    raise EvalError(
-        f"unsupported binary operation: {starlark_type(a)} << {starlark_type(b)}"
-    )
+    raise EvalError(f"unsupported binary operation: {starlark_type(a)} << {starlark_type(b)}")
 
 
 def _shift_right(a: Any, b: Any) -> Any:
@@ -855,9 +854,7 @@ def _shift_right(a: Any, b: Any) -> Any:
             raise EvalError(f"negative shift count: {b}")
         # Right shift can never blow up memory; cap left shift only.
         return a >> b
-    raise EvalError(
-        f"unsupported binary operation: {starlark_type(a)} >> {starlark_type(b)}"
-    )
+    raise EvalError(f"unsupported binary operation: {starlark_type(a)} >> {starlark_type(b)}")
 
 
 def _contains(container: Any, item: Any) -> bool:
@@ -888,9 +885,7 @@ def _index_get(obj: Any, idx: Any) -> Any:
         n = len(obj)
         i = idx + n if idx < 0 else idx
         if i < 0 or i >= n:
-            raise EvalError(
-                f"index out of range (index is {idx}, but sequence has {n} elements)"
-            )
+            raise EvalError(f"index out of range (index is {idx}, but sequence has {n} elements)")
         return obj[i]
     if isinstance(obj, (StarlarkList, tuple)):
         if not _is_int(idx):
@@ -898,9 +893,7 @@ def _index_get(obj: Any, idx: Any) -> Any:
         n = len(obj)
         i = idx + n if idx < 0 else idx
         if i < 0 or i >= n:
-            raise EvalError(
-                f"index out of range (index is {idx}, but sequence has {n} elements)"
-            )
+            raise EvalError(f"index out of range (index is {idx}, but sequence has {n} elements)")
         return obj[i]
     if isinstance(obj, Dict):
         return obj[idx]
@@ -918,9 +911,7 @@ def _index_set(obj: Any, idx: Any, value: Any) -> None:
         n = len(obj)
         i = idx + n if idx < 0 else idx
         if i < 0 or i >= n:
-            raise EvalError(
-                f"index out of range (index is {idx}, but sequence has {n} elements)"
-            )
+            raise EvalError(f"index out of range (index is {idx}, but sequence has {n} elements)")
         obj[i] = value
         return
     if isinstance(obj, Dict):
@@ -939,9 +930,7 @@ def _slice(obj: Any, start, end, step, mutability: Mutability) -> Any:
         raise EvalError("slice step cannot be zero")
     for label, val in (("start", start), ("stop", end)):
         if val is not None and not _is_int(val):
-            raise EvalError(
-                f"got {starlark_type(val)} for {label} index, want int"
-            )
+            raise EvalError(f"got {starlark_type(val)} for {label} index, want int")
     if isinstance(obj, str):
         return obj[_py_slice(start, end, step)]
     if isinstance(obj, tuple):
@@ -974,6 +963,7 @@ def _attr_get(obj: Any, name: str) -> Any:
     if isinstance(fields, dict) and name in fields:
         return fields[name]
     from . import methods
+
     method = methods.get_method(obj, name)
     if method is None:
         raise EvalError(f"'{starlark_type(obj)}' value has no field or method '{name}'")
@@ -1220,9 +1210,7 @@ def _iterate(value: Any):
         return iter(value)
     if isinstance(value, dict):
         return iter(value)
-    raise EvalError(
-        f"got value of type '{starlark_type(value)}', want 'iterable'"
-    )
+    raise EvalError(f"got value of type '{starlark_type(value)}', want 'iterable'")
 
 
 def _format_float(x: float, conv: str) -> str:
@@ -1245,6 +1233,7 @@ def _format_float(x: float, conv: str) -> str:
         return "-inf"
     if conv in ("f", "F"):
         from decimal import Decimal
+
         # Use the shortest round-trip representation (via repr) rather than
         # the exact binary value, so `"%f" % 1.23e45` produces the rounded
         # form Java's BigDecimal-based formatter emits, not the exact
@@ -1254,6 +1243,7 @@ def _format_float(x: float, conv: str) -> str:
     if conv in ("g", "G"):
         # str(x) and "%g" % x should give the same answer per the spec.
         from .values import _float_repr
+
         return _float_repr(x)
     return format(x, conv)
 
@@ -1292,6 +1282,7 @@ def _str_format(template: str, arg: Any) -> str:
         arg_index += 1
         if conv == "s":
             from .values import str_starlark
+
             result.append(str_starlark(a))
         elif conv == "r":
             result.append(repr_starlark(a))
@@ -1305,18 +1296,14 @@ def _str_format(template: str, arg: Any) -> str:
                     raise EvalError("got -inf, want a finite number")
                 a = int(a)
             elif not _is_int(a):
-                raise EvalError(
-                    f"got {starlark_type(a)} for '%{conv}' format, want int or float"
-                )
+                raise EvalError(f"got {starlark_type(a)} for '%{conv}' format, want int or float")
             if conv in ("d", "i"):
                 result.append(str(a))
             else:
                 result.append(format(a, conv))
         elif conv in ("e", "f", "g", "E", "F", "G"):
             if not _is_num(a):
-                raise EvalError(
-                    f"got {starlark_type(a)} for '%{conv}' format, want int or float"
-                )
+                raise EvalError(f"got {starlark_type(a)} for '%{conv}' format, want int or float")
             result.append(_format_float(float(a), conv))
         elif conv == "c":
             if _is_int(a):

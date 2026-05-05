@@ -76,12 +76,7 @@ PROGRAMS: dict[str, str] = {
     "list_ops": "print([1, 2, 3] + [4, 5])",
     "dict_ops": 'print({"a": 1, "b": 2})',
     "tuple_ops": "print((1, 2, 3))",
-    "for_loop": (
-        "total = 0\n"
-        "for i in range(5):\n"
-        "    total += i\n"
-        "print(total)\n"
-    ),
+    "for_loop": ("total = 0\nfor i in range(5):\n    total += i\nprint(total)\n"),
     "if_else": (
         "x = 5\n"
         "if x > 0:\n"
@@ -93,18 +88,10 @@ PROGRAMS: dict[str, str] = {
     ),
     "list_comprehension": "print([x*2 for x in range(5) if x % 2 == 0])",
     "dict_comprehension": "print({k: k*k for k in range(4)})",
-    "function_def": (
-        "def add(a, b):\n"
-        "    return a + b\n"
-        "print(add(2, 3))\n"
-    ),
+    "function_def": ("def add(a, b):\n    return a + b\nprint(add(2, 3))\n"),
     "lambda": "print((lambda x: x * x)(7))",
     "closure": (
-        "def outer(n):\n"
-        "    def inner():\n"
-        "        return n\n"
-        "    return inner()\n"
-        "print(outer(42))\n"
+        "def outer(n):\n    def inner():\n        return n\n    return inner()\nprint(outer(42))\n"
     ),
     "tuple_unpacking": "a, b = 1, 2\nprint(a, b)\n",
     "string_format": 'print("%d %s" % (3, "hi"))',
@@ -132,6 +119,4 @@ def test_cross(name: str) -> None:
         f"exit status differs: go={go_status} python={py_status}\n"
         f"go stdout: {go_out!r}\npython stdout: {py_out!r}"
     )
-    assert go_out == py_out, (
-        f"stdout differs:\n  go:     {go_out!r}\n  python: {py_out!r}"
-    )
+    assert go_out == py_out, f"stdout differs:\n  go:     {go_out!r}\n  python: {py_out!r}"

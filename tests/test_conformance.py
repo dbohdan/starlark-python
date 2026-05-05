@@ -108,9 +108,7 @@ def run_chunk(name: str, chunk: str) -> list[str]:
             for msg in error_messages:
                 if pat.search(msg):
                     unmatched = [
-                        (ml, mp)
-                        for ml, mp in unmatched
-                        if ml != line or mp != pat.pattern
+                        (ml, mp) for ml, mp in unmatched if ml != line or mp != pat.pattern
                     ]
                     break
 
@@ -139,9 +137,7 @@ def test_conformance(path: Path, request):
     if path.name in SKIP_FILES:
         pytest.skip(SKIP_FILES[path.name])
     if path.name in XFAIL_FILES:
-        request.applymarker(
-            pytest.mark.xfail(reason=XFAIL_FILES[path.name], strict=XFAIL_STRICT)
-        )
+        request.applymarker(pytest.mark.xfail(reason=XFAIL_FILES[path.name], strict=XFAIL_STRICT))
     source = path.read_text(encoding="utf-8")
     failures: list[str] = []
     for line, chunk in chunks(source):

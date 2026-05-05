@@ -40,12 +40,7 @@ def test_deeply_nested_if_rejected_at_parse_time():
 def test_deeply_nested_value_rejected_at_eval_time_in_repr():
     # Build a deeply nested list at runtime — no source-level nesting,
     # so the parser doesn't catch it. The evaluator's repr cap should.
-    src = (
-        "x = []\n"
-        "for i in range(1000):\n"
-        "    x = [x]\n"
-        "y = repr(x)\n"
-    )
+    src = "x = []\nfor i in range(1000):\n    x = [x]\ny = repr(x)\n"
     with pytest.raises(EvalError, match="too deeply nested"):
         starlark.exec_file(src)
 

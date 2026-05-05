@@ -305,9 +305,7 @@ class Resolver:
             if target.step is not None:
                 self._resolve_expr(target.step)
         else:
-            self._error(
-                f"cannot assign to {type(target).__name__}", target.start
-            )
+            self._error(f"cannot assign to {type(target).__name__}", target.start)
 
     def _resolve_assign_target_for_read(self, target) -> None:
         """Resolve LHS as a *read* (used by augmented assignment)."""
@@ -420,9 +418,7 @@ class Resolver:
         for p in params:
             if isinstance(p, MandatoryParameter):
                 if seen_default and not seen_star:
-                    self._error(
-                        "non-default parameter follows default parameter", p.start
-                    )
+                    self._error("non-default parameter follows default parameter", p.start)
                 if seen_starstar:
                     self._error("parameter after **kwargs", p.start)
                 self._check_param_name(p.name, seen, p.start)
@@ -515,9 +511,7 @@ class Resolver:
                     self._resolve_expr(arg.value)
                 elif isinstance(arg, KeywordArgument):
                     if arg.name.name in seen_kw:
-                        self._error(
-                            f"duplicate keyword argument: {arg.name.name}", arg.start
-                        )
+                        self._error(f"duplicate keyword argument: {arg.name.name}", arg.start)
                     seen_kw[arg.name.name] = arg.start
                     self._resolve_expr(arg.value)
                 elif isinstance(arg, (StarArgument, StarStarArgument)):

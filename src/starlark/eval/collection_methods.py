@@ -48,9 +48,7 @@ def l_pop(self: StarlarkList, index: Any = -1) -> Any:
         raise EvalError("pop from empty list")
     i = index + n if index < 0 else index
     if i < 0 or i >= n:
-        raise EvalError(
-            f"index out of range (index is {index}, but sequence has {n} elements)"
-        )
+        raise EvalError(f"index out of range (index is {index}, but sequence has {n} elements)")
     return self.pop(index)
 
 
@@ -83,16 +81,19 @@ def d_get(self: Dict, key: Any, default: Any = None) -> Any:
 
 def d_keys(self: Dict) -> StarlarkList:
     from .builtins import _mut
+
     return StarlarkList(self.keys(), _mut())
 
 
 def d_values(self: Dict) -> StarlarkList:
     from .builtins import _mut
+
     return StarlarkList(self.values(), _mut())
 
 
 def d_items(self: Dict) -> StarlarkList:
     from .builtins import _mut
+
     return StarlarkList(self.items(), _mut())
 
 
@@ -178,6 +179,7 @@ def st_pop(self: StarlarkSet) -> Any:
 
 def st_union(self: StarlarkSet, *others) -> StarlarkSet:
     from .builtins import _mut
+
     out = StarlarkSet(list(self), _mut())
     for o in others:
         for x in _to_set_collection(o):
@@ -188,6 +190,7 @@ def st_union(self: StarlarkSet, *others) -> StarlarkSet:
 
 def st_intersection(self: StarlarkSet, *others) -> StarlarkSet:
     from .builtins import _mut
+
     other_sets = [set(_to_set_collection(o)) for o in others]
     keep: list = []
     for x in self:
@@ -198,6 +201,7 @@ def st_intersection(self: StarlarkSet, *others) -> StarlarkSet:
 
 def st_difference(self: StarlarkSet, *others) -> StarlarkSet:
     from .builtins import _mut
+
     other_sets = [set(_to_set_collection(o)) for o in others]
     keep: list = []
     for x in self:
@@ -211,6 +215,7 @@ def st_symmetric_difference(self: StarlarkSet, *others) -> StarlarkSet:
         raise EvalError("set.symmetric_difference() accepts no more than 1 positional argument")
     other = others[0]
     from .builtins import _mut
+
     other_list = list(_to_set_collection(other))
     other_set = set(other_list)
     keep: list = []

@@ -226,9 +226,7 @@ class Parser:
     def _error(self, message: str, pos: int) -> None:
         if len(self._errors) >= self._max_errors:
             return
-        self._errors.append(
-            StarlarkSyntaxError(self._lexer.locs.position(pos), message)
-        )
+        self._errors.append(StarlarkSyntaxError(self._lexer.locs.position(pos), message))
 
     def _syntax_error(self, message: str) -> None:
         if self._recovery:
@@ -274,6 +272,7 @@ class Parser:
         # Python's RecursionError does, raise the recursion limit while
         # we parse and restore it afterwards.
         import sys
+
         old = sys.getrecursionlimit()
         sys.setrecursionlimit(max(old, self._max_depth * 50 + 500))
         try:
@@ -284,6 +283,7 @@ class Parser:
 
     def parse_expression(self) -> Expression:
         import sys
+
         old = sys.getrecursionlimit()
         sys.setrecursionlimit(max(old, self._max_depth * 50 + 500))
         try:
@@ -348,9 +348,7 @@ class Parser:
         if self._at(TokenKind.EQUALS) or op is not None:
             self._next()
             rhs = self._parse_expr()
-            return AssignmentStatement(
-                start=lhs.start, end=rhs.end, lhs=lhs, op=op, rhs=rhs
-            )
+            return AssignmentStatement(start=lhs.start, end=rhs.end, lhs=lhs, op=op, rhs=rhs)
 
         return ExpressionStatement(start=lhs.start, end=lhs.end, expression=lhs)
 
@@ -365,9 +363,7 @@ class Parser:
         load_tok = self._expect(TokenKind.LOAD)
         self._expect(TokenKind.LPAREN)
         if not self._at(TokenKind.STRING):
-            module = StringLiteral(
-                start=self._tok.start, end=self._tok.end, value=""
-            )
+            module = StringLiteral(start=self._tok.start, end=self._tok.end, value="")
             self._expect(TokenKind.STRING)
         else:
             module = self._parse_string_literal()
@@ -375,9 +371,7 @@ class Parser:
         if self._at(TokenKind.RPAREN):
             self._syntax_error("expected at least one symbol to load")
             tok = self._next()
-            return LoadStatement(
-                start=load_tok.start, end=tok.end, module=module, bindings=[]
-            )
+            return LoadStatement(start=load_tok.start, end=tok.end, module=module, bindings=[])
         self._expect(TokenKind.COMMA)
 
         bindings: list[LoadBinding] = []
@@ -388,9 +382,7 @@ class Parser:
                 break
             self._parse_load_symbol(bindings)
         rparen = self._expect(TokenKind.RPAREN)
-        return LoadStatement(
-            start=load_tok.start, end=rparen.end, module=module, bindings=bindings
-        )
+        return LoadStatement(start=load_tok.start, end=rparen.end, module=module, bindings=bindings)
 
     def _parse_load_symbol(self, out: list[LoadBinding]) -> None:
         tok = self._tok
@@ -425,9 +417,7 @@ class Parser:
             cond = self._parse_test_expr()
             self._expect(TokenKind.COLON)
             body = self._parse_suite()
-            elif_node = IfStatement(
-                start=elif_tok.start, end=elif_tok.end, cond=cond, body=body
-            )
+            elif_node = IfStatement(start=elif_tok.start, end=elif_tok.end, cond=cond, body=body)
             tail.else_block = [elif_node]
             tail = elif_node
         if self._at(TokenKind.ELSE):
@@ -444,9 +434,7 @@ class Parser:
         self._expect(TokenKind.COLON)
         body = self._parse_suite()
         end = body[-1].end if body else coll.end
-        return ForStatement(
-            start=for_tok.start, end=end, vars=vars_, iterable=coll, body=body
-        )
+        return ForStatement(start=for_tok.start, end=end, vars=vars_, iterable=coll, body=body)
 
     def _parse_def_statement(self) -> DefStatement:
         def_tok = self._expect(TokenKind.DEF)
@@ -457,15 +445,15 @@ class Parser:
         self._expect(TokenKind.COLON)
         body = self._parse_suite()
         end = body[-1].end if body else name.end
-        return DefStatement(
-            start=def_tok.start, end=end, name=name, parameters=params, body=body
-        )
+        return DefStatement(start=def_tok.start, end=end, name=name, parameters=params, body=body)
 
     def _parse_parameters(self) -> list[Parameter]:
         out: list[Parameter] = []
         seen = False
-        while not self._at(TokenKind.RPAREN) and not self._at(TokenKind.COLON) and not self._at(
-            TokenKind.EOF
+        while (
+            not self._at(TokenKind.RPAREN)
+            and not self._at(TokenKind.COLON)
+            and not self._at(TokenKind.EOF)
         ):
             if seen:
                 self._expect(TokenKind.COMMA)
@@ -490,9 +478,7 @@ class Parser:
         if self._at(TokenKind.EQUALS):
             self._next()
             default = self._parse_test_expr()
-            return OptionalParameter(
-                start=id_.start, end=default.end, name=id_, default=default
-            )
+            return OptionalParameter(start=id_.start, end=default.end, name=id_, default=default)
         return MandatoryParameter(start=id_.start, end=id_.end, name=id_)
 
     def _parse_suite(self) -> list[Statement]:
@@ -522,13 +508,9 @@ class Parser:
             return e
         elements: list[Expression] = [e]
         self._parse_expr_list(elements, trailing_comma_allowed=False)
-        return ListExpression(
-            start=e.start, end=elements[-1].end, is_tuple=True, elements=elements
-        )
+        return ListExpression(start=e.start, end=elements[-1].end, is_tuple=True, elements=elements)
 
-    def _parse_expr_list(
-        self, out: list[Expression], *, trailing_comma_allowed: bool
-    ) -> None:
+    def _parse_expr_list(self, out: list[Expression], *, trailing_comma_allowed: bool) -> None:
         while self._at(TokenKind.COMMA):
             self._next()
             if self._tok.kind in EXPR_LIST_TERMINATORS:
@@ -574,9 +556,7 @@ class Parser:
         params = self._parse_parameters()
         self._expect(TokenKind.COLON)
         body = self._parse_test_expr() if allow_cond else self._parse_test_no_cond()
-        return LambdaExpression(
-            start=tok.start, end=body.end, parameters=params, body=body
-        )
+        return LambdaExpression(start=tok.start, end=body.end, parameters=params, body=body)
 
     def _parse_at_prec(self, prec: int) -> Expression:
         if prec >= len(OPERATOR_PRECEDENCE):
@@ -588,9 +568,7 @@ class Parser:
     def _parse_not_expr(self, prec: int) -> Expression:
         tok = self._expect(TokenKind.NOT)
         x = self._parse_at_prec(prec)
-        return UnaryOperatorExpression(
-            start=tok.start, end=x.end, op=TokenKind.NOT, operand=x
-        )
+        return UnaryOperatorExpression(start=tok.start, end=x.end, op=TokenKind.NOT, operand=x)
 
     def _parse_binop_expr(self, prec: int) -> Expression:
         x = self._parse_at_prec(prec + 1)
@@ -621,19 +599,11 @@ class Parser:
             x = self._optimize_binop(x, op, y)
             last_op = op
 
-    def _optimize_binop(
-        self, x: Expression, op: TokenKind, y: Expression
-    ) -> Expression:
+    def _optimize_binop(self, x: Expression, op: TokenKind, y: Expression) -> Expression:
         # Constant-fold "a" + "b" — matches the Java reference's optimization.
-        if (
-            op == TokenKind.PLUS
-            and isinstance(x, StringLiteral)
-            and isinstance(y, StringLiteral)
-        ):
+        if op == TokenKind.PLUS and isinstance(x, StringLiteral) and isinstance(y, StringLiteral):
             return StringLiteral(start=x.start, end=y.end, value=x.value + y.value)
-        return BinaryOperatorExpression(
-            start=x.start, end=y.end, op=op, lhs=x, rhs=y
-        )
+        return BinaryOperatorExpression(start=x.start, end=y.end, op=op, lhs=x, rhs=y)
 
     # -------------------------------------------------------------- primary
 
@@ -666,9 +636,7 @@ class Parser:
         if kind in (TokenKind.MINUS, TokenKind.PLUS, TokenKind.TILDE):
             self._next()
             x = self._parse_primary_with_suffix()
-            return UnaryOperatorExpression(
-                start=tok.start, end=x.end, op=kind, operand=x
-            )
+            return UnaryOperatorExpression(start=tok.start, end=x.end, op=kind, operand=x)
         # Error
         start = tok.start
         self._syntax_error("expected expression")
@@ -706,9 +674,7 @@ class Parser:
             start_e = self._parse_expr()
             if self._at(TokenKind.RBRACKET):
                 rbr = self._expect(TokenKind.RBRACKET)
-                return IndexExpression(
-                    start=e.start, end=rbr.end, obj=e, index=start_e
-                )
+                return IndexExpression(start=e.start, end=rbr.end, obj=e, index=start_e)
 
         self._expect(TokenKind.COLON)
         if not self._at(TokenKind.COLON) and not self._at(TokenKind.RBRACKET):
@@ -769,9 +735,7 @@ class Parser:
         lparen = self._expect(TokenKind.LPAREN)
         if self._at(TokenKind.RPAREN):
             rparen = self._next()
-            return ListExpression(
-                start=lparen.start, end=rparen.end, is_tuple=True, elements=[]
-            )
+            return ListExpression(start=lparen.start, end=rparen.end, is_tuple=True, elements=[])
         e = self._parse_test_expr()
         if self._at(TokenKind.RPAREN):
             self._next()
@@ -784,9 +748,7 @@ class Parser:
                 start=lparen.start, end=rparen.end, is_tuple=True, elements=elements
             )
         if self._at(TokenKind.FOR):
-            self._syntax_error(
-                "Starlark does not support Python-style generator expressions"
-            )
+            self._syntax_error("Starlark does not support Python-style generator expressions")
         self._expect(TokenKind.RPAREN)
         end = self._sync_to(EXPR_TERMINATORS)
         return self._make_error_expr(lparen.start, end)
@@ -795,15 +757,11 @@ class Parser:
         lbr = self._expect(TokenKind.LBRACKET)
         if self._at(TokenKind.RBRACKET):
             rbr = self._next()
-            return ListExpression(
-                start=lbr.start, end=rbr.end, is_tuple=False, elements=[]
-            )
+            return ListExpression(start=lbr.start, end=rbr.end, is_tuple=False, elements=[])
         e = self._parse_test_expr()
         if self._at(TokenKind.RBRACKET):
             rbr = self._next()
-            return ListExpression(
-                start=lbr.start, end=rbr.end, is_tuple=False, elements=[e]
-            )
+            return ListExpression(start=lbr.start, end=rbr.end, is_tuple=False, elements=[e])
         if self._at(TokenKind.FOR):
             return self._parse_comprehension_suffix(lbr.start, e, TokenKind.RBRACKET)
         if self._at(TokenKind.COMMA):
@@ -871,9 +829,7 @@ class Parser:
             elements=elements,
         )
 
-    def _parse_comprehension_suffix(
-        self, l_offset: int, body, closing: TokenKind
-    ) -> Expression:
+    def _parse_comprehension_suffix(self, l_offset: int, body, closing: TokenKind) -> Expression:
         clauses: list = []
         while True:
             if self._at(TokenKind.FOR):

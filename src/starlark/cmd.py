@@ -50,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if value is not None:
             from .eval.values import repr_starlark
+
             print(repr_starlark(value))
         return 0
 
@@ -91,6 +92,7 @@ def _repl() -> int:
             continue
         if value is not None:
             from .eval.values import repr_starlark
+
             print(repr_starlark(value))
 
 

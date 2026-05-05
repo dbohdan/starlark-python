@@ -15,10 +15,14 @@ from .values import BuiltinFunction, Dict, Range, StarlarkList, StarlarkSet
 
 def _bind(name: str, value: Any, impl: Callable) -> BuiltinFunction:
     type_name = (
-        "list" if isinstance(value, StarlarkList)
-        else "dict" if isinstance(value, Dict)
-        else "set" if isinstance(value, StarlarkSet)
-        else "string" if isinstance(value, str)
+        "list"
+        if isinstance(value, StarlarkList)
+        else "dict"
+        if isinstance(value, Dict)
+        else "set"
+        if isinstance(value, StarlarkSet)
+        else "string"
+        if isinstance(value, str)
         else type(value).__name__
     )
     return BuiltinFunction(

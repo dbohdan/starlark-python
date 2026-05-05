@@ -250,12 +250,7 @@ def test_closure():
 def test_recursion_forbidden():
     # Per the Starlark spec, recursion is not allowed.
     with pytest.raises(EvalError, match="called recursively"):
-        run(
-            "def fact(n):\n"
-            "    if n <= 1: return 1\n"
-            "    return n * fact(n - 1)\n"
-            "z = fact(5)\n"
-        )
+        run("def fact(n):\n    if n <= 1: return 1\n    return n * fact(n - 1)\nz = fact(5)\n")
 
 
 # ----------------------------------------------------------- comprehensions
