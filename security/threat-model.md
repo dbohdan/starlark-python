@@ -9,9 +9,10 @@ whether this implementation matches their needs.
 
 Source files (`.star` programs and the values they construct) are
 **untrusted**. A program may produce malicious *values* — any
-configuration language permits that, since even static TOML can
-declare a billion nulls. A program **cannot** perform malicious
-actions:
+configuration language permits that, since even static JSON can
+declare a billion-element array and YAML has the canonical
+billion-laughs entity-expansion attack. A program **cannot** perform
+malicious actions:
 
 - **No filesystem read or write.** No builtin opens, reads, writes,
   globs, or stats files. The only filesystem-touching code in the
