@@ -7,6 +7,8 @@ is mostly inline; we keep it simple.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from .errors import EvalError
@@ -27,44 +29,49 @@ from .values import (
     truth,
 )
 
-# Builtins that need to allocate mutable values use the current Module's
-# Mutability. Builtins that need to call back into Starlark (e.g.
-# `sorted(key=fn)`) use the current Thread. Both are stack-pushed by the
-# evaluator's `call()` and `eval_file()`.
-_CURRENT_MUTABILITY: list[Mutability] = []
-_CURRENT_THREAD: list[Any] = []  # actually Thread, but avoid circular import
+# Per-context state. ContextVar isolates state per OS thread (and per asyncio
+# task), so two host threads can call `exec_file` concurrently without
+# stepping on each other. Within a single context, `with_thread()` /
+# `with_mutability()` use `Token`s for nesting-safe save/restore.
+#
+# Builtins that allocate mutable values read the current Module's `Mutability`
+# from `_CURRENT_MUTABILITY`; builtins that call back into Starlark (e.g.,
+# `sorted(key=fn)`) read the current `Thread` from `_CURRENT_THREAD`. The
+# evaluator sets both around each `call()` and `eval_file()`.
+_CURRENT_MUTABILITY: ContextVar[Mutability] = ContextVar(
+    "starlark.current_mutability"
+)
+_CURRENT_THREAD: ContextVar[Any] = ContextVar("starlark.current_thread")
 
 
+@contextmanager
 def with_mutability(mutability: Mutability):
-    class _Ctx:
-        def __enter__(self):
-            _CURRENT_MUTABILITY.append(mutability)
-            return self
-
-        def __exit__(self, *exc):
-            _CURRENT_MUTABILITY.pop()
-            return False
-
-    return _Ctx()
+    token = _CURRENT_MUTABILITY.set(mutability)
+    try:
+        yield
+    finally:
+        _CURRENT_MUTABILITY.reset(token)
 
 
+@contextmanager
 def with_thread(thread: Any):
-    class _Ctx:
-        def __enter__(self):
-            _CURRENT_THREAD.append(thread)
-            return self
-
-        def __exit__(self, *exc):
-            _CURRENT_THREAD.pop()
-            return False
-
-    return _Ctx()
+    token = _CURRENT_THREAD.set(thread)
+    try:
+        yield
+    finally:
+        _CURRENT_THREAD.reset(token)
 
 
 def _mut() -> Mutability:
-    if _CURRENT_MUTABILITY:
-        return _CURRENT_MUTABILITY[-1]
+    m = _CURRENT_MUTABILITY.get(None)
+    if m is not None:
+        return m
     return Mutability("<builtin>")
+
+
+def current_thread() -> Any:
+    """Return the current Thread, or None if no evaluation is in progress."""
+    return _CURRENT_THREAD.get(None)
 
 
 def _call_starlark(fn: Any, *args: Any) -> Any:
@@ -73,13 +80,14 @@ def _call_starlark(fn: Any, *args: Any) -> Any:
     Goes through evaluator.call() so error wrapping (TypeError -> EvalError,
     frame pushing, recursion checks) is consistent with normal call sites.
     """
-    if not _CURRENT_THREAD:
+    thread = _CURRENT_THREAD.get(None)
+    if thread is None:
         # Fallback for tests that didn't push a thread context.
         if isinstance(fn, BuiltinFunction):
             return fn.impl(*args)
         raise EvalError("cannot call user-defined function from this context")
     from .evaluator import call as _call
-    return _call(fn, list(args), {}, _CURRENT_THREAD[-1])
+    return _call(fn, list(args), {}, thread)
 
 
 def _check_callable(name: str, value: Any) -> None:
@@ -567,4 +575,4 @@ def make_universal() -> dict[str, Any]:
     return table
 
 
-__all__ = ["make_universal", "with_mutability"]
+__all__ = ["current_thread", "make_universal", "with_mutability", "with_thread"]

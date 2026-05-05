@@ -7,6 +7,8 @@ Conformance .star files use them as predeclared globals (not via load()).
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -26,23 +28,48 @@ class _Reporter:
     errors: list[str] = field(default_factory=list)
 
 
-# Per-thread reporter; mirrors the Java ScriptTest's StarlarkThread.threadLocal.
-_REPORTERS: list[_Reporter] = []
+# Per-context reporter. ContextVar isolates state per OS thread so concurrent
+# conformance runs don't share a reporter; nested `with_reporter` blocks use
+# `Token` save/restore.
+_REPORTER: ContextVar[_Reporter] = ContextVar("starlark.test_driver.reporter")
 
 
 def push_reporter() -> _Reporter:
+    """Install a new reporter and return it. Pair with `pop_reporter`.
+
+    The `Token` returned by `ContextVar.set` is stashed on the reporter so
+    `pop_reporter` can restore the previous value. This makes nested push/pop
+    safe under concurrent use from multiple OS threads (each thread has its
+    own context).
+    """
     r = _Reporter()
-    _REPORTERS.append(r)
+    r._token = _REPORTER.set(r)  # type: ignore[attr-defined]
     return r
 
 
 def pop_reporter() -> _Reporter:
-    return _REPORTERS.pop()
+    """Restore the previous reporter and return the one being popped."""
+    r = _REPORTER.get()
+    _REPORTER.reset(r._token)  # type: ignore[attr-defined]
+    return r
+
+
+@contextmanager
+def with_reporter(r: _Reporter | None = None):
+    """Context manager form of push/pop_reporter. Thread-safe under nesting."""
+    if r is None:
+        r = _Reporter()
+    token = _REPORTER.set(r)
+    try:
+        yield r
+    finally:
+        _REPORTER.reset(token)
 
 
 def _report(msg: str) -> None:
-    if _REPORTERS:
-        _REPORTERS[-1].errors.append(msg)
+    r = _REPORTER.get(None)
+    if r is not None:
+        r.errors.append(msg)
     else:
         # No reporter registered; surface as an EvalError so the user sees it.
         raise EvalError(msg)
@@ -139,8 +166,9 @@ def b_freeze(*args) -> Any:
         # values it owns become read-only. Used by the conformance suite
         # to test frozen-state behavior.
         from .builtins import _CURRENT_MUTABILITY
-        if _CURRENT_MUTABILITY:
-            _CURRENT_MUTABILITY[-1].freeze()
+        m = _CURRENT_MUTABILITY.get(None)
+        if m is not None:
+            m.freeze()
         return None
     x = args[0]
     if hasattr(x, "mutability"):
@@ -180,4 +208,5 @@ __all__ = [
     "make_predeclared",
     "pop_reporter",
     "push_reporter",
+    "with_reporter",
 ]
