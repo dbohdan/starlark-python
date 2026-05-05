@@ -4,6 +4,40 @@ Brief tour of the codebase and the public API. The top-level
 [`README.md`](../README.md) is for users; this is for people working on the
 interpreter itself.
 
+The Starlark language spec lives next to this file as
+[`spec.md`](spec.md).
+
+## Compatibility with the reference implementations
+
+These are the user-visible places this implementation diverges from the
+Bazel Java reference and from `starlark-go`. Everything else aims for
+exact behavioral and string-output equivalence.
+
+- **Integers are Python `int`.** Arbitrary precision; no overflow. The
+  Java reference uses a `StarlarkInt` union of int32 / int64 /
+  BigInteger and surfaces overflow at the boundary.
+- **Strings are indexed by Unicode code point.** The Java reference
+  indexes by UTF-16 code unit, which produces surprising results on
+  non-BMP characters (a single emoji is one index in our world, two
+  indices in Java's). The spec leaves this implementation-defined.
+- **No 32-bit-range checks for `range()` / `*` repeat / etc.** Native
+  `int` arithmetic doesn't overflow, so these checks would be
+  artificial. We instead cap container allocations at 16M elements with
+  a less specific error message.
+- **`if` and `for` are allowed at top level.** This matches `starlark-go`
+  in `-globalreassign` mode and the `.bzl` file dialect; it diverges
+  from BUILD-file mode, which forbids them. We don't currently
+  distinguish dialects — the host is expected to apply a stricter
+  pre-check if it cares (Bazel does this via `FileOptions`).
+- **`while` and recursion are forbidden.** Same as both references in
+  their default mode.
+- **`load()` is host-mediated.** The host supplies a `Loader` callable
+  (`Callable[[str], Module]`); without one, `load()` raises. There is no
+  filesystem access by default.
+- **`print()` writes to stderr** and ends with a newline. This matches
+  both references; cross-validation in `tests/test_cross_validation.py`
+  asserts byte-equal stderr+stdout output.
+
 ## Codebase structure
 
     src/starlark/

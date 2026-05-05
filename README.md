@@ -129,5 +129,8 @@ This is a derivative work: the lexer, parser, resolver, evaluator, and value
 model are ported from the Java reference implementation maintained by **The
 Bazel Authors** as part of [bazelbuild/bazel][bazel]. The conformance test
 files under [`conformance/`](conformance/) are copied verbatim from that
-project. The original Apache-2.0 copyright and license terms apply to all
-derived material.
+project. [`docs/spec.md`](docs/spec.md) is fetched verbatim from
+[bazelbuild/starlark][starlark-spec] for offline reference. The original
+Apache-2.0 copyright and license terms apply to all derived material.
+
+[starlark-spec]: https://github.com/bazelbuild/starlark
