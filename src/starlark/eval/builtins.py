@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from .errors import EvalError
+from .limits import MAX_CONTAINER_ELEMENTS, check_container_size
 from .mutability import Mutability
 from .values import (
     BuiltinFunction,
@@ -108,6 +109,31 @@ def _to_iter(v: Any):
     if isinstance(v, (tuple, StarlarkList, Dict, StarlarkSet, Range)):
         return iter(v)
     raise EvalError(f"got value of type '{starlark_type(v)}', want 'iterable'")
+
+
+def _drain(v: Any, *, label: str = "elements") -> list:
+    """Materialise an iterable into a Python list, with a size cap.
+
+    Use this anywhere a builtin needs to read all of a (potentially
+    user-controlled) iterable into memory: list(), set(), sorted(),
+    enumerate(), zip(), reversed(), sum(). Centralizing here means
+    `list(range(2**60))` raises a clean error instead of OOM-ing.
+    """
+    # Fast path for known-size containers — check before iterating.
+    try:
+        n = len(v)
+    except TypeError:
+        n = None
+    if n is not None:
+        check_container_size(n, label=label)
+        return list(_to_iter(v))
+    # Unknown size: stream into a list with a running cap.
+    out: list = []
+    for x in _to_iter(v):
+        if len(out) >= MAX_CONTAINER_ELEMENTS:
+            check_container_size(len(out) + 1, label=label)  # raises
+        out.append(x)
+    return out
 
 
 # ---------------------------------------------------------------- type / len
@@ -284,13 +310,13 @@ def b_hash(x: Any) -> int:
 
 
 def b_list(x: Any = ()) -> StarlarkList:
-    return StarlarkList(list(_to_iter(x)) if x != () else [], _mut())
+    return StarlarkList(_drain(x) if x != () else [], _mut())
 
 
 def b_tuple(x: Any = ()) -> tuple:
     if x == ():
         return ()
-    return tuple(_to_iter(x))
+    return tuple(_drain(x))
 
 
 def b_dict(*args, **kwargs) -> Dict:
@@ -323,7 +349,7 @@ def b_set(*args: Any) -> StarlarkSet:
         raise EvalError("set() accepts no more than 1 positional argument")
     if not args:
         return StarlarkSet(mutability=_mut())
-    return StarlarkSet(list(_to_iter(args[0])), _mut())
+    return StarlarkSet(_drain(args[0]), _mut())
 
 
 def b_range(*args) -> Range:
@@ -343,22 +369,24 @@ def b_enumerate(x: Any, start: int = 0) -> StarlarkList:
     if not _is_int(start):
         raise EvalError("enumerate() start must be int")
     return StarlarkList(
-        [(i + start, v) for i, v in enumerate(_to_iter(x))], _mut()
+        [(i + start, v) for i, v in enumerate(_drain(x))], _mut()
     )
 
 
 def b_zip(*args) -> StarlarkList:
-    iters = [list(_to_iter(a)) for a in args]
+    iters = [_drain(a) for a in args]
     return StarlarkList([tuple(t) for t in zip(*iters, strict=False)], _mut())
 
 
 def b_reversed(x: Any) -> StarlarkList:
-    return StarlarkList(list(reversed(list(_to_iter(x)))), _mut())
+    items = _drain(x)
+    items.reverse()
+    return StarlarkList(items, _mut())
 
 
 def b_sorted(x: Any, *, key: Any = None, reverse: bool = False) -> StarlarkList:
     _check_callable("key", key)
-    items = list(_to_iter(x))
+    items = _drain(x)
     keys = [_call_starlark(key, v) if key is not None else v for v in items]
 
     class _K:
@@ -393,14 +421,14 @@ def _min_max(args, key, *, _is_min: bool) -> Any:
     if len(args) == 0:
         raise EvalError("expected at least one item")
     if len(args) == 1:
-        # Single-arg case: iterate.
+        # Single-arg case: iterate. min/max use a slightly different error
+        # wording than the generic _drain helper, so reformat the type error.
         try:
-            it = _to_iter(args[0])
+            items = _drain(args[0])
         except EvalError:
             raise EvalError(
                 f"type '{starlark_type(args[0])}' is not iterable"
             ) from None
-        items = list(it)
         if not items:
             raise EvalError("expected at least one item")
     else:

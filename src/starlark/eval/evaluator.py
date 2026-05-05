@@ -24,6 +24,7 @@ from ..syntax.resolver import Binding, Scope
 from ..syntax.tokens import TokenKind
 from .errors import EvalError
 from .function import StarlarkFunction, bind_arguments
+from .limits import check_container_size, check_repeat
 from .module import Module
 from .mutability import Mutability
 from .values import (
@@ -42,20 +43,6 @@ from .values import (
 
 # Sentinel for "local declared but not assigned yet".
 _UNBOUND = object()
-
-# Soft limit on container allocations to avoid hangs / OOMs on hostile input.
-# The Java reference uses a similar cap.
-_MAX_REPEAT = 1 << 24  # 16M elements
-
-
-def _check_repeat_size(n: int) -> int:
-    if n > _MAX_REPEAT:
-        raise EvalError(
-            f"got {n} for repeat, want value in signed 32-bit range"
-            if n >= (1 << 31)
-            else f"excessive repeat ({n} elements)"
-        )
-    return n
 
 
 # ---------------------------------------------------------------- signals
@@ -535,12 +522,14 @@ def _plus(a: Any, b: Any) -> Any:
     if _is_num(a) and _is_num(b):
         return _safe_num_op(lambda x, y: x + y, a, b)
     if isinstance(a, str) and isinstance(b, str):
+        check_container_size(len(a) + len(b), label="characters")
         return a + b
     if isinstance(a, tuple) and isinstance(b, tuple):
+        check_container_size(len(a) + len(b))
         return a + b
     if isinstance(a, StarlarkList) and isinstance(b, StarlarkList):
-        result = StarlarkList(list(a) + list(b), a.mutability)
-        return result
+        check_container_size(len(a) + len(b))
+        return StarlarkList(list(a) + list(b), a.mutability)
     raise EvalError(f"unsupported binary operation: {starlark_type(a)} + {starlark_type(b)}")
 
 
@@ -560,34 +549,24 @@ def _multiply(a: Any, b: Any) -> Any:
     if _is_num(a) and _is_num(b):
         return _safe_num_op(lambda x, y: x * y, a, b)
     if _is_int(a) and isinstance(b, str):
-        _check_repeat(max(0, a), len(b), unit="characters")
+        check_repeat(max(0, a), len(b), unit="characters")
         return b * max(0, a)
     if isinstance(a, str) and _is_int(b):
-        _check_repeat(max(0, b), len(a), unit="characters")
+        check_repeat(max(0, b), len(a), unit="characters")
         return a * max(0, b)
     if _is_int(a) and isinstance(b, tuple):
-        _check_repeat(max(0, a), len(b))
+        check_repeat(max(0, a), len(b))
         return b * max(0, a)
     if isinstance(a, tuple) and _is_int(b):
-        _check_repeat(max(0, b), len(a))
+        check_repeat(max(0, b), len(a))
         return a * max(0, b)
     if _is_int(a) and isinstance(b, StarlarkList):
-        _check_repeat(max(0, a), len(b))
+        check_repeat(max(0, a), len(b))
         return StarlarkList(list(b) * max(0, a), b.mutability)
     if isinstance(a, StarlarkList) and _is_int(b):
-        _check_repeat(max(0, b), len(a))
+        check_repeat(max(0, b), len(a))
         return StarlarkList(list(a) * max(0, b), a.mutability)
     raise EvalError(f"unsupported binary operation: {starlark_type(a)} * {starlark_type(b)}")
-
-
-def _check_repeat(factor: int, length: int, *, unit: str = "elements") -> None:
-    n = factor * length
-    if n > _MAX_REPEAT:
-        if factor >= (1 << 31):
-            raise EvalError(
-                f"got {factor} for repeat, want value in signed 32-bit range"
-            )
-        raise EvalError(f"excessive repeat ({length} * {factor} {unit})")
 
 
 def _div(a: Any, b: Any) -> Any:

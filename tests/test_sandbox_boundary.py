@@ -128,7 +128,7 @@ def _call_method(receiver: Any, name: str, fn) -> Any:
     for args in candidates:
         try:
             return fn(receiver, *args)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             last_err = e
             continue
     raise AssertionError(

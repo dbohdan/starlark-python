@@ -139,15 +139,20 @@ class StarlarkList:
 
     def extend(self, items) -> None:
         self.mutability.check("list")
-        # Cheap pre-check for known-size iterables to avoid OOM on hostile input.
+        from .limits import MAX_CONTAINER_ELEMENTS, check_container_size
+        # Pre-check for known-size iterables to avoid OOM on hostile input.
         try:
             n = len(items)
         except TypeError:
-            n = 0
-        if n > (1 << 24):
-            from .errors import EvalError as _E
-            raise _E(f"excessive capacity requested: {n} elements")
+            n = None
+        if n is not None:
+            check_container_size(len(self._data) + n)
+            self._data.extend(items)
+            return
+        # Streaming case: cap as we go.
         for x in items:
+            if len(self._data) >= MAX_CONTAINER_ELEMENTS:
+                check_container_size(len(self._data) + 1)
             self._data.append(x)
 
     def insert(self, index: int, value: Any) -> None:
