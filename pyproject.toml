@@ -48,7 +48,7 @@ build-backend = "hatchling.build"
 packages = ["src/starlark"]
 
 [tool.poe.env]
-"PYTHON_SOURCES" = "src/ tests/"
+"PYTHON_SOURCES" = "scripts/ src/ tests/"
 
 [tool.poe.tasks.check]
 sequence = ["format", "lint", "typecheck"]
@@ -56,11 +56,7 @@ help = "Run the formatter, then all static checks"
 ignore_fail = "return_non_zero"
 
 [tool.poe.tasks.clean]
-shell = '''
-  rm -rf build dist starlark-python.pyz starlark.pyz
-  find . -type d -name __pycache__ -exec rm -rf {} +
-  rm -rf .pytest_cache .ruff_cache
-'''
+script = "scripts.tasks:clean"
 help = "Remove built files"
 
 [tool.poe.tasks.files]
@@ -84,15 +80,7 @@ cmd = "pytest -q"
 help = "Run Pytest (not through tox)"
 
 [tool.poe.tasks.zipapp]
-shell = '''
-  rm -rf build/zipapp build/starlark-python.pyz
-  mkdir -p build/zipapp
-  cp -r src/starlark build/zipapp/
-  printf 'import sys\nfrom starlark.cmd import main\nsys.exit(main())\n' > build/zipapp/__main__.py
-  uv run python -m zipapp build/zipapp -o starlark-python.pyz -p '/usr/bin/env python3'
-  echo "Built ./starlark-python.pyz"
-  du -h starlark-python.pyz
-'''
+script = "scripts.tasks:zipapp"
 help = "Build zipapp"
 
 [tool.poe.tasks.typecheck]
