@@ -26,6 +26,8 @@ def eval(
     *,
     max_steps: int | None = None,
     on_max_steps: Callable[[Thread], None] | None = None,
+    max_allocs: int | None = None,
+    on_max_allocs: Callable[[Thread], None] | None = None,
     **env: Any,
 ) -> Any:
     """Evaluate a Starlark expression and return the resulting value.
@@ -39,6 +41,10 @@ def eval(
       expression nodes, calls). Raises `StepLimitExceeded` when exceeded.
     - `on_max_steps`: optional callback invoked once when the step cap is
       reached, before `StepLimitExceeded` is raised.
+    - `max_allocs`: cap on cumulative allocation in approximate bytes.
+      Raises `AllocLimitExceeded` when exceeded.
+    - `on_max_allocs`: optional callback invoked once when the alloc cap
+      is reached, before `AllocLimitExceeded` is raised.
     """
     expr = parse_expression(source, file=filename)
     universal = make_universal()
@@ -51,6 +57,8 @@ def eval(
         locs=locs,
         max_steps=max_steps,
         on_max_steps=on_max_steps,
+        max_allocs=max_allocs,
+        on_max_allocs=on_max_allocs,
     )
     # Wrap as an expression statement to evaluate via eval_file.
     from .syntax import ast as _ast
@@ -82,6 +90,8 @@ def exec_file(
     loader: Callable[[str], Module] | None = None,
     max_steps: int | None = None,
     on_max_steps: Callable[[Thread], None] | None = None,
+    max_allocs: int | None = None,
+    on_max_allocs: Callable[[Thread], None] | None = None,
 ) -> Module:
     """Parse, resolve, and execute `source` as a Starlark file.
 
@@ -96,6 +106,11 @@ def exec_file(
       expression nodes, calls). Raises `StepLimitExceeded` when exceeded.
     - `on_max_steps`: optional callback invoked once when the step cap is
       reached, before `StepLimitExceeded` is raised.
+    - `max_allocs`: cap on cumulative allocation in approximate bytes.
+      Raises `AllocLimitExceeded` when exceeded. Charge-only — values
+      that go out of scope are not refunded.
+    - `on_max_allocs`: optional callback invoked once when the alloc cap
+      is reached, before `AllocLimitExceeded` is raised.
     """
     file = parse(source, file=filename)
     locs = Lexer(source, file=filename).locs
@@ -120,6 +135,8 @@ def exec_file(
         loader=loader,
         max_steps=max_steps,
         on_max_steps=on_max_steps,
+        max_allocs=max_allocs,
+        on_max_allocs=on_max_allocs,
     )
     from .eval.builtins import with_mutability, with_thread
     with with_mutability(module.mutability), with_thread(thread):

@@ -30,7 +30,31 @@ from dataclasses import dataclass
 from typing import Any
 
 from .errors import EvalError
+from .limits import (
+    ALLOC_DICT_ENTRY,
+    ALLOC_LIST_ELEM,
+    ALLOC_RANGE,
+    ALLOC_SET_ENTRY,
+    dict_alloc,
+    list_alloc,
+    set_alloc,
+)
 from .mutability import IMMUTABLE, Mutability
+
+
+def _charge(n: int) -> None:
+    """Charge `n` approximate bytes against the current Thread's heap counter.
+
+    No-op if there is no current Thread (e.g. unit tests that build values
+    directly). The contextvar lookup is the only per-allocation overhead;
+    avoid hot-path imports by binding lazily.
+    """
+    # Local import to avoid a circular dependency at module load time
+    # (builtins.py imports from values.py).
+    from .builtins import _CURRENT_THREAD
+    thread = _CURRENT_THREAD.get(None)
+    if thread is not None:
+        thread.add_allocs(n)
 
 # --------------------------------------------------------------- type names
 
@@ -100,6 +124,7 @@ class StarlarkList:
     def __init__(self, items: list | None = None, mutability: Mutability | None = None) -> None:
         self._data: list = list(items) if items else []
         self.mutability = mutability if mutability is not None else IMMUTABLE
+        _charge(list_alloc(len(self._data)))
 
     # ----- read-only ops
 
@@ -136,6 +161,7 @@ class StarlarkList:
     def append(self, value: Any) -> None:
         self.mutability.check("list")
         self._data.append(value)
+        _charge(ALLOC_LIST_ELEM)
 
     def extend(self, items) -> None:
         self.mutability.check("list")
@@ -148,12 +174,16 @@ class StarlarkList:
         if n is not None:
             check_container_size(len(self._data) + n)
             self._data.extend(items)
+            _charge(ALLOC_LIST_ELEM * n)
             return
         # Streaming case: cap as we go.
+        added = 0
         for x in items:
             if len(self._data) >= MAX_CONTAINER_ELEMENTS:
                 check_container_size(len(self._data) + 1)
             self._data.append(x)
+            added += 1
+        _charge(ALLOC_LIST_ELEM * added)
 
     def insert(self, index: int, value: Any) -> None:
         self.mutability.check("list")
@@ -234,6 +264,7 @@ class Dict:
             for k, v in items.items():
                 self._data[_normalize_key(k)] = v
         self.mutability = mutability if mutability is not None else IMMUTABLE
+        _charge(dict_alloc(len(self._data)))
 
     # ----- read-only
 
@@ -290,7 +321,11 @@ class Dict:
     def __setitem__(self, key: Any, value: Any) -> None:
         self.mutability.check("dict")
         check_hashable(key)
-        self._data[_normalize_key(key)] = value
+        nk = _normalize_key(key)
+        # Charge per new entry; updates of existing keys don't grow the dict.
+        if nk not in self._data:
+            _charge(ALLOC_DICT_ENTRY)
+        self._data[nk] = value
 
     def __delitem__(self, key: Any) -> None:
         self.mutability.check("dict")
@@ -301,6 +336,7 @@ class Dict:
 
     def update(self, other) -> None:
         self.mutability.check("dict")
+        before = len(self._data)
         if isinstance(other, Dict):
             for k, v in other._data.items():
                 self._data[_normalize_key(k)] = v
@@ -311,6 +347,9 @@ class Dict:
             for k, v in other:
                 check_hashable(k)
                 self._data[_normalize_key(k)] = v
+        added = len(self._data) - before
+        if added:
+            _charge(ALLOC_DICT_ENTRY * added)
 
     def setdefault(self, key: Any, default: Any) -> Any:
         check_hashable(key)
@@ -321,6 +360,7 @@ class Dict:
         if nk in self._data:
             return self._data[nk]
         self._data[nk] = default
+        _charge(ALLOC_DICT_ENTRY)
         return default
 
     def pop(self, key: Any, *default) -> Any:
@@ -374,6 +414,7 @@ class StarlarkSet:
                 check_hashable(x)
                 self._data[x] = None
         self.mutability = mutability if mutability is not None else IMMUTABLE
+        _charge(set_alloc(len(self._data)))
 
     def __len__(self) -> int:
         return len(self._data)
@@ -387,6 +428,8 @@ class StarlarkSet:
     def add(self, item: Any) -> None:
         self.mutability.check("set")
         check_hashable(item)
+        if item not in self._data:
+            _charge(ALLOC_SET_ENTRY)
         self._data[item] = None
 
     def discard(self, item: Any) -> None:
@@ -432,6 +475,7 @@ class Range:
     def __post_init__(self):
         if self.step == 0:
             raise EvalError("step cannot be 0")
+        _charge(ALLOC_RANGE)
 
     def __len__(self) -> int:
         if self.step > 0:

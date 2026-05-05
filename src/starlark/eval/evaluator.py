@@ -23,9 +23,14 @@ from ..syntax import ast
 from ..syntax.location import FileLocations, Position
 from ..syntax.resolver import Binding, Scope
 from ..syntax.tokens import TokenKind
-from .errors import EvalError, StepLimitExceeded
+from .errors import AllocLimitExceeded, EvalError, StepLimitExceeded
 from .function import StarlarkFunction, bind_arguments
-from .limits import check_container_size, check_repeat
+from .limits import (
+    check_container_size,
+    check_repeat,
+    string_alloc,
+    tuple_alloc,
+)
 from .module import Module
 from .mutability import Mutability
 from .values import (
@@ -99,6 +104,11 @@ class Thread:
     - `on_max_steps`: optional `Callable[[Thread], None]` invoked once when
       the step cap is reached. If it returns normally, `tick()` raises;
       hosts can use it to surface a richer error or to attribute the abort.
+    - `max_allocs`: cap on `allocs` (cumulative bytes allocated, not
+      live memory). When `add_allocs()` would push `allocs` over the limit,
+      raises `AllocLimitExceeded` (or invokes `on_max_allocs`).
+    - `on_max_allocs`: callback for the alloc cap, same shape as
+      `on_max_steps`.
 
     Step accounting: `tick()` is called at three sites — top of every
     statement, top of every expression evaluation, and entry of every
@@ -106,17 +116,26 @@ class Thread:
     operations, not Python instructions) and matches starlark-java's
     documented choice. See `security/threat-model.md` and
     `security/cost-estimates.md`.
+
+    Heap accounting: charge-only. Every container constructor and
+    mutating concat/extend charges approximate bytes via `add_allocs`.
+    The counter measures *cumulative allocation*, not live memory —
+    values that go out of scope and are GC'd are not refunded. This
+    makes the bound predictable but conservative.
     """
 
     __slots__ = (
         "active",
+        "allocs",
         "depth",
         "frames",
         "loader",
         "locs",
+        "max_allocs",
         "max_depth",
         "max_steps",
         "module",
+        "on_max_allocs",
         "on_max_steps",
         "predeclared",
         "steps",
@@ -134,6 +153,8 @@ class Thread:
         max_depth: int | None = None,
         max_steps: int | None = None,
         on_max_steps: Callable[[Thread], None] | None = None,
+        max_allocs: int | None = None,
+        on_max_allocs: Callable[[Thread], None] | None = None,
     ) -> None:
         self.module = module
         self.predeclared = predeclared or {}
@@ -157,6 +178,12 @@ class Thread:
         self.steps: int = 0
         self.max_steps: int | None = max_steps
         self.on_max_steps: Callable[[Thread], None] | None = on_max_steps
+        # Memory-bound counter. Charge-only (never refunded); semantically
+        # cumulative bytes, not live memory. `add_allocs()` is hot — every
+        # container construction and mutating concat charges it.
+        self.allocs: int = 0
+        self.max_allocs: int | None = max_allocs
+        self.on_max_allocs: Callable[[Thread], None] | None = on_max_allocs
         # Host-attachable state, type-keyed (parallels Java's threadLocal).
         # Use `thread.thread_local[MyKey] = value` to stash per-evaluation
         # data; useful for builtins that want to share a cache or report
@@ -181,6 +208,31 @@ class Thread:
             raise StepLimitExceeded(
                 f"Starlark computation cancelled: too many steps "
                 f"({self.steps} > {self.max_steps})"
+            )
+
+    def add_allocs(self, n: int) -> None:
+        """Charge `n` approximate bytes against the heap counter.
+
+        When `max_allocs` is set and the new total would exceed it,
+        invokes `on_max_allocs(self)` (if set) and then raises
+        `AllocLimitExceeded`. The callback is fired once; subsequent
+        calls raise without re-firing it.
+
+        Negative deltas are rejected — the counter is charge-only by
+        design, so refunds would silently desynchronize hosts that read
+        `Thread.allocs` for cost reporting.
+        """
+        if n < 0:
+            raise ValueError("add_allocs: negative delta is not supported")
+        self.allocs += n
+        if self.max_allocs is not None and self.allocs > self.max_allocs:
+            cb = self.on_max_allocs
+            if cb is not None:
+                self.on_max_allocs = None
+                cb(self)
+            raise AllocLimitExceeded(
+                f"Starlark computation cancelled: heap budget exhausted "
+                f"({self.allocs} > {self.max_allocs} bytes)"
             )
 
 
@@ -423,7 +475,9 @@ def _eval_expr_inner(expr, frame: Frame, thread: Thread) -> Any:
     if isinstance(expr, ast.ListExpression):
         items = [_eval_expr(e, frame, thread) for e in expr.elements]
         if expr.is_tuple:
-            return tuple(items)
+            t = tuple(items)
+            _charge_thread_alloc(tuple_alloc(len(t)))
+            return t
         return StarlarkList(items, thread.module.mutability)
     if isinstance(expr, ast.DictExpression):
         d = Dict(mutability=thread.module.mutability)
@@ -612,15 +666,30 @@ def _plus(a: Any, b: Any) -> Any:
     if _is_num(a) and _is_num(b):
         return _safe_num_op(lambda x, y: x + y, a, b)
     if isinstance(a, str) and isinstance(b, str):
-        check_container_size(len(a) + len(b), label="characters")
+        n = check_container_size(len(a) + len(b), label="characters")
+        _charge_thread_alloc(string_alloc(n))
         return a + b
     if isinstance(a, tuple) and isinstance(b, tuple):
-        check_container_size(len(a) + len(b))
+        n = check_container_size(len(a) + len(b))
+        _charge_thread_alloc(tuple_alloc(n))
         return a + b
     if isinstance(a, StarlarkList) and isinstance(b, StarlarkList):
+        # StarlarkList.__init__ already charges via _charge in values.py.
         check_container_size(len(a) + len(b))
         return StarlarkList(list(a) + list(b), a.mutability)
     raise EvalError(f"unsupported binary operation: {starlark_type(a)} + {starlark_type(b)}")
+
+
+def _charge_thread_alloc(n: int) -> None:
+    """Charge approximate bytes against the current Thread's heap counter.
+
+    Mirrors `values._charge` but lives here to avoid pulling in builtins.py
+    on every binary op. Both helpers do the same thing; either is fine.
+    """
+    from .builtins import _CURRENT_THREAD
+    thread = _CURRENT_THREAD.get(None)
+    if thread is not None:
+        thread.add_allocs(n)
 
 
 def _minus(a: Any, b: Any) -> Any:
@@ -640,18 +709,27 @@ def _multiply(a: Any, b: Any) -> Any:
         return _safe_num_op(lambda x, y: x * y, a, b)
     if _is_int(a) and isinstance(b, str):
         check_repeat(max(0, a), len(b), unit="characters")
-        return b * max(0, a)
+        out = b * max(0, a)
+        _charge_thread_alloc(string_alloc(len(out)))
+        return out
     if isinstance(a, str) and _is_int(b):
         check_repeat(max(0, b), len(a), unit="characters")
-        return a * max(0, b)
+        out = a * max(0, b)
+        _charge_thread_alloc(string_alloc(len(out)))
+        return out
     if _is_int(a) and isinstance(b, tuple):
         check_repeat(max(0, a), len(b))
-        return b * max(0, a)
+        out_t = b * max(0, a)
+        _charge_thread_alloc(tuple_alloc(len(out_t)))
+        return out_t
     if isinstance(a, tuple) and _is_int(b):
         check_repeat(max(0, b), len(a))
-        return a * max(0, b)
+        out_t = a * max(0, b)
+        _charge_thread_alloc(tuple_alloc(len(out_t)))
+        return out_t
     if _is_int(a) and isinstance(b, StarlarkList):
         check_repeat(max(0, a), len(b))
+        # StarlarkList.__init__ charges; no extra accounting here.
         return StarlarkList(list(b) * max(0, a), b.mutability)
     if isinstance(a, StarlarkList) and _is_int(b):
         check_repeat(max(0, b), len(a))

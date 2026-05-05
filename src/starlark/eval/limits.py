@@ -60,4 +60,76 @@ def check_repeat(factor: int, length: int, *, unit: str = "elements") -> None:
         raise EvalError(f"excessive repeat ({length} * {factor} {unit})")
 
 
-__all__ = ["MAX_CONTAINER_ELEMENTS", "check_container_size", "check_repeat"]
+# --------------------------------------------------------------- alloc costs
+#
+# Approximate byte costs used by the charge-only heap counter. They are
+# rough — exact CPython sizes depend on the build, compaction state, and
+# small-int caching — and the counter is documented as cumulative
+# allocation, not live-memory residency. Numbers calibrated from
+# `sys.getsizeof` on a 64-bit CPython 3.11 build, rounded to round numbers
+# so the constants are easy to reason about.
+
+# Empty-container overhead. Includes the Python wrapper plus the
+# underlying dict/list and the Mutability reference.
+ALLOC_LIST_BASE = 64
+ALLOC_DICT_BASE = 256
+ALLOC_SET_BASE = 256
+ALLOC_TUPLE_BASE = 56
+ALLOC_RANGE = 56
+
+# Per-element cost. dict and set entries are larger than list slots
+# because each entry stores a hash + key + value (set uses a sentinel
+# value, so equivalent overhead).
+ALLOC_LIST_ELEM = 8
+ALLOC_TUPLE_ELEM = 8
+ALLOC_DICT_ENTRY = 56
+ALLOC_SET_ENTRY = 56
+
+# Strings and ints have variable per-byte overhead; we charge a small
+# fixed amount per character. Numbers/bools/None are not charged
+# (interned or near-zero per-instance cost).
+ALLOC_STRING_BASE = 48
+ALLOC_STRING_PER_CHAR = 1
+
+
+def list_alloc(n: int) -> int:
+    return ALLOC_LIST_BASE + ALLOC_LIST_ELEM * n
+
+
+def tuple_alloc(n: int) -> int:
+    return ALLOC_TUPLE_BASE + ALLOC_TUPLE_ELEM * n
+
+
+def dict_alloc(n: int) -> int:
+    return ALLOC_DICT_BASE + ALLOC_DICT_ENTRY * n
+
+
+def set_alloc(n: int) -> int:
+    return ALLOC_SET_BASE + ALLOC_SET_ENTRY * n
+
+
+def string_alloc(n: int) -> int:
+    return ALLOC_STRING_BASE + ALLOC_STRING_PER_CHAR * n
+
+
+__all__ = [
+    "ALLOC_DICT_BASE",
+    "ALLOC_DICT_ENTRY",
+    "ALLOC_LIST_BASE",
+    "ALLOC_LIST_ELEM",
+    "ALLOC_RANGE",
+    "ALLOC_SET_BASE",
+    "ALLOC_SET_ENTRY",
+    "ALLOC_STRING_BASE",
+    "ALLOC_STRING_PER_CHAR",
+    "ALLOC_TUPLE_BASE",
+    "ALLOC_TUPLE_ELEM",
+    "MAX_CONTAINER_ELEMENTS",
+    "check_container_size",
+    "check_repeat",
+    "dict_alloc",
+    "list_alloc",
+    "set_alloc",
+    "string_alloc",
+    "tuple_alloc",
+]
