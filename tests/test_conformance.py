@@ -33,6 +33,7 @@ STAR_FILES = sorted(CONFORMANCE_DIR.glob("*.star"))
 
 # Files that exercise features we haven't implemented yet. Trim as we go.
 XFAIL_FILES: dict[str, str] = {
+    "json.star": "expects Java-reference UTF-16 string indexing & exact error wording",
     "set.star": "set spec corners",
     "fields.star": "mutablestruct field type-tracking on reassignment",
     "string_format.star": "advanced %-formatting",
@@ -53,9 +54,7 @@ XFAIL_STRICT = False  # set True after the list is curated
 # Files we skip entirely because they exercise behavior that would hang or
 # require very heavy infrastructure (e.g., 2-billion-element range allocation
 # with capacity-limit detection, JSON serialization, etc.).
-SKIP_FILES: dict[str, str] = {
-    "json.star": "json.encode/decode not implemented",
-}
+SKIP_FILES: dict[str, str] = {}
 
 
 def chunks(source: str):
@@ -88,9 +87,14 @@ def run_chunk(name: str, chunk: str) -> list[str]:
 
     expected = expectations_in(chunk)
     reporter = push_reporter()
+    # The conformance suite occasionally probes Bazel-specific feature flags
+    # by name (e.g. `_utf8_byte_strings`). We expose them as predeclared
+    # globals set to False so the gated branches pick the non-Bazel path.
+    pre = make_predeclared()
+    pre["_utf8_byte_strings"] = False
     try:
         try:
-            starlark.exec_file(chunk, filename=name, predeclared=make_predeclared())
+            starlark.exec_file(chunk, filename=name, predeclared=pre)
             evaluated = True
             error_messages: list[str] = []
         except starlark.EvalError as e:

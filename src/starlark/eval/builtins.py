@@ -472,6 +472,8 @@ def make_universal() -> dict[str, Any]:
     ]
     for name, fn in pairs:
         table[name] = BuiltinFunction(name=name, impl=fn)
+    from .json_module import make_module
+    table["json"] = make_module()
     return table
 
 
