@@ -1,7 +1,7 @@
 # CLAUDE.md
 
-Orientation for future Claude sessions resuming this port. Read STATUS.md
-*after* this for the current journal entry.
+Orientation for future Claude sessions resuming this port. Read HISTORY.md
+*after* this for the original 14-phase plan and the running journal.
 
 ## What this repo is
 
@@ -16,7 +16,7 @@ into a scratch checkout. The actual deliverable lives in `src/starlark/`.
 
 ## Architectural decisions (settled — DO NOT relitigate)
 
-If you want to deviate, write a 3-paragraph analysis in STATUS.md under
+If you want to deviate, write a 3-paragraph analysis in HISTORY.md under
 "Decisions Pending" and continue on something else.
 
 1. **Tree-walking interpreter.** Recursive evaluation over the AST, mirroring
@@ -67,8 +67,7 @@ If you want to deviate, write a 3-paragraph analysis in STATUS.md under
       test_lexer_conformance.py    38 .star files lex
       test_parser_conformance.py   38 .star files parse (chunk-split on '---')
       test_smoke.py        import check + xfail eval('1+1')
-    ROADMAP.md             14 phases with Java references
-    STATUS.md              Journal — newest entries on top
+    HISTORY.md             Original 14-phase plan + append-only journal
     pyproject.toml         hatchling, no runtime deps, pytest+ruff dev
     uv.lock                Pinned dev deps
 
@@ -82,8 +81,9 @@ If you want to deviate, write a 3-paragraph analysis in STATUS.md under
    messages: "Phase N: <what>." for phase landings.
 6. **Every commit has a test delta.** Either a new passing test, an xfail
    flipping to xpass, or a new xfail with explanation.
-7. **STATUS.md after every phase boundary.** Date, what landed, what's next,
-   any Decisions Pending.
+7. **HISTORY.md after every phase boundary or significant push.** New
+   entry at the top of the journal. Date, what landed, what's next, any
+   Decisions Pending.
 
 ## Conformance tests
 
@@ -120,7 +120,7 @@ Do NOT stop because:
 - A phase is hard. Read more reference code.
 - A test fails. Fix it or xfail it with explanation.
 - You're uncertain about a small detail. Pick the obvious option, document it
-  in STATUS.md, move on.
+  in the HISTORY.md journal, move on.
 
 ## Branch and push
 

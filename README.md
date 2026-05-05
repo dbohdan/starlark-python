@@ -12,8 +12,9 @@ language. Ported from the Java reference implementation that ships with
 34 of 38 conformance test files passing (89%); the 4 remaining xfails are
 all documented divergences from the Java reference (UTF-16 string
 indexing, 32-bit `range()` bounds, Bazel-specific `mutablestruct` test
-helper) — see [`docs/README.md`](docs/README.md). [`STATUS.md`](STATUS.md)
-holds the journal; [`ROADMAP.md`](ROADMAP.md) the original plan.
+helper) — see [`docs/README.md`](docs/README.md). The original 14-phase plan
+and the journal of what actually shipped both live in
+[`HISTORY.md`](HISTORY.md).
 
 ## Goals
 
@@ -99,8 +100,7 @@ reference's exact error wording for these checks; they are listed in
       eval/       value model, evaluator, builtins, methods, loader
       cmd.py      CLI entry point
     tests/        Pytest suite (unit + conformance).
-    STATUS.md     Implementation journal.
-    ROADMAP.md    14-phase implementation plan.
+    HISTORY.md    Original 14-phase plan + append-only journal.
 
 ## Development
 
