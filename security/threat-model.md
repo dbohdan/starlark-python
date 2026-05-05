@@ -50,9 +50,6 @@ malicious actions:
 
 ## What the interpreter does **not** defend against
 
-The reviewers correctly flagged this section as missing. Be explicit
-about it.
-
 - **CPU exhaustion.** There is **no step counter**. A `for` loop over
   a large `range`, a deeply nested non-recursive computation, or any
   CPU-bound construction can run until the host process is killed or
