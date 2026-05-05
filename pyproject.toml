@@ -1,7 +1,7 @@
 [project]
 name = "starlark"
 version = "0.1.0"
-description = "Pure-Python tree-walking interpreter for the Starlark configuration language."
+description = "Pure-Python implementation of the Starlark configuration language."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
