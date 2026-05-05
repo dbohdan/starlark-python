@@ -405,99 +405,282 @@ Notes / clarifications:
 
 ## Retrospective
 
-Brief notes from the agent (Claude) at the end of the port, intended as
-input for a write-up of the project.
+End-of-project notes from the agent (Claude) doing the port, intended as
+input for a write-up. First-person throughout; what follows is meant to
+be honest rather than diplomatic.
 
 ### What worked
 
-- **Phases + conformance dashboard.** The 14-phase plan plus
-  `tests/test_conformance.py` as a progress dial was the engine of this
-  port. I never had to hold the whole port in my head; each phase had a
-  small Java surface to read and a clear test delta. Watching the xfail
-  count drop on every iteration was both a forcing function and
-  motivation.
+#### Phases plus the conformance dashboard
 
-- **Python natives where they fit.** Using `int`, `str`, `tuple`,
-  `bool`, `None` directly — instead of wrapping every value — saved
-  maybe a thousand lines of plumbing. Equality, hashing, repr, and
-  arithmetic Just Work. The price is two real divergences (arbitrary-
-  precision int, code-point string indexing) and one quirk (`True == 1`
-  is False in Starlark, so `equal()` overrides). The trade was clearly
-  worth it.
+The 14-phase plan you wrote up front and `tests/test_conformance.py` as a
+progress dial were the engine of this port. The phase plan gave me a
+dependency graph to walk; the conformance suite gave me a number that had
+to monotonically improve. I never had to hold the whole port in my head —
+each phase had a small Java surface to read and a clear test delta.
 
-- **`Mutability` as a token.** Cleanest part of the port. One per
-  `Module`, every mutable holds a reference, freeze is O(1). The Java
-  reference's design ported straight across.
+Two specific properties of this combination mattered:
 
-- **Cross-validation against starlark-go.** Cheap, catches real bugs.
-  `print()`-to-stderr wasn't in any unit test I'd written; the
-  cross-validator surfaced it immediately. Should have wired it up
-  earlier — I had the binary on PATH for the last quarter of the
-  project but only used it for spot-checks until the final push.
+1. **Each phase had a falsifiable "done" criterion.** "Tests pass and one
+   or more conformance files flip from xfail to xpass." Without that
+   external signal I'd have spent days inside `evaluator.py` polishing
+   comprehensions instead of moving to builtins.
+2. **The dashboard was visible without ceremony.** `pytest -q` printed
+   the count. I could see whether a refactor was a wash or a win in
+   under two seconds. Cheap feedback loops are everything for this style
+   of work.
 
-- **`xfail` as a progress mechanism.** `XFAIL_STRICT = False` during
-  the spec push (so xpasses showed up as cues to remove the file from
-  the list), then `XFAIL_STRICT = True` once curated, kept the suite
-  honest.
+I'd absolutely use the same template again. If anything I'd lean harder
+on it: the phase plan you gave me let me pause whenever I felt fuzzy,
+re-read the relevant `reference/` Java file end to end, and then come
+back to the Python with a much clearer picture. That habit was easier to
+form because the phase plan made it cheap to context-switch.
+
+#### Python natives where they fit
+
+Using `int`, `str`, `tuple`, `bool`, `None` directly — instead of wrapping
+every Starlark value in a class — saved maybe a thousand lines of plumbing.
+Equality, hashing, `repr`, and arithmetic Just Work. The lexer can emit
+plain `int` and `float` for literals; the parser doesn't need to wrap
+them; the evaluator doesn't need a single `unbox` call.
+
+The price is three documented divergences:
+
+1. Arbitrary-precision int (no overflow, no signed-32-bit checks).
+2. Code-point string indexing (the Java reference indexes by UTF-16
+   code unit, which surfaces in surrogate handling).
+3. The bool-vs-int identity quirk: `equal()` has to override to return
+   False for `True == 1`.
+
+All three are intentional and documented under "Compatibility" in
+`docs/README.md`. They're the cause of every remaining xfail.
+
+I'm convinced this trade was right, but it's worth flagging that it
+*does* cost you exact behavioral equivalence with the Java reference on
+specific edge cases. If matching Bazel byte-for-byte were the goal you'd
+want a `StarlarkInt` wrapper and code-unit string indexing. We got
+89% conformance without either, which is a defensible point in the
+design space.
+
+#### `Mutability` as a token
+
+The cleanest part of the port. One `Mutability` per `Module`, every
+mutable value holds a reference, every mutating method calls
+`self.mutability.check()`, and `Module.freeze()` flips one boolean. The
+Java reference's design ported straight across; I wrote almost no
+original code here.
+
+Two small wrinkles surfaced late: `freeze(value)` (with an argument)
+should freeze just *that* value, not the whole module — solved by
+giving the value its own fresh frozen Mutability rather than calling
+`.freeze()` on the shared one. And `freeze()` (no argument) freezes the
+current module, which only works because of the `_CURRENT_MUTABILITY`
+stack I'm grumpy about elsewhere.
+
+#### Cross-validation against starlark-go
+
+Cheap and high-signal. The `print()`-to-stderr behavior wasn't in any
+unit test I'd written; the cross-validator surfaced it within ten minutes
+of being wired up. Same for `-globalreassign` mode (top-level `if`/`for`)
+and the BUILD-vs-`.bzl` distinction.
+
+I should have set this up in Phase 1, not Phase 14. The reference binary
+is on PATH and answers any "does it actually behave this way?" question
+in five seconds; I instead read the Java source for those questions for
+the first three quarters of the port. The phase plan called this out as
+"when the binary is on PATH" but I treated that as optional rather than
+something to make true on day one. Lesson learned.
+
+#### `xfail` as a progress mechanism
+
+`tests/test_conformance.py` has a dict of `XFAIL_FILES`. With
+`XFAIL_STRICT = False` during the spec push, an xpass shows up as a hint
+to remove the file from the list. With `XFAIL_STRICT = True` after the
+list is curated, an unintended xpass becomes a CI failure. Switching
+between modes — strict during development of new fixes, then strict at
+the end — is a remarkably tight feedback loop for "did my change unlock
+a file?". Pytest's machinery is doing all the work; the project just
+uses it.
 
 ### What was annoying
 
-- **Error-message wording is half the conformance suite's surface.**
-  A meaningful chunk of failures aren't testing semantics — they're
-  testing exact strings the Java reference happens to emit. The xfail
-  review forced me to separate "real spec bug" from "wording" before
-  grinding through the wording, which was the right move; doing both
-  in the same pass would have been faster but shallower on actual
-  semantics.
+#### Error-message wording is half the conformance suite's surface
 
-- **Two format-string implementations.** `%`-formatting (in
-  `evaluator._str_format`) and `.format()` (in
-  `string_methods._format_impl`) ended up as parallel parsers that
-  reject different things. They should share a tokenizer. Not refactored
-  for fear of regressions, but it's a smell.
+A meaningful chunk of conformance failures aren't testing semantics —
+they're testing the exact strings the Java reference happens to emit.
+The convention in `conformance/*.star` is that an `### regex` comment on
+a line declares the expected error pattern, so wording is part of the
+test contract.
 
-- **The `_CURRENT_THREAD` / `_CURRENT_MUTABILITY` context-var stacks**
-  are ugly. They exist so builtins like `sorted(key=fn)` can call back
-  into the evaluator without threading a `Thread` through every builtin
-  signature. Threading it through explicitly would have been
-  mechanical but cleaner.
+This means a "real" semantic gap and a wording mismatch look identical
+in the failure output. They're worth different effort: the first is a
+bug, the second is mechanical drudgery. Mixing them in the same pass
+made me slower at both.
 
-- **NaN as a dict key.** The spec wants `d[float("nan")] = v` to update
-  an existing nan entry. Python's `nan != nan` makes dict lookups miss.
-  Canonicalizing every nan key to a singleton works, but the fact that
-  `Dict` grew a `_normalize_key` helper for one corner is a tell.
+The xfail review you asked for was the right intervention. Forcing me
+to triage every failure as **SPEC** / **WORDING** /
+**JAVA-32BIT** / **JAVA-UTF16** / **TEST-DRIVER** before fixing meant I
+could land the spec fixes confidently and then decide separately
+whether to align the wording. Without that step I'd have gone fast and
+shallow.
+
+If I were starting over: I'd defer wording alignment until each chunk
+file's *semantics* passes, then do a single sweep at the end where
+matching strings is the only goal. Treating it as a separate pass also
+makes it more skippable — if you don't care about byte-equivalence, you
+just stop.
+
+#### Two format-string implementations
+
+`%`-formatting lives in `evaluator._str_format` (called from the `%`
+binary operator). `.format()` lives in `string_methods._format_impl`.
+They ended up as parallel parsers that reject different things and have
+slightly different views of what counts as a "field name". They should
+share a tokenizer.
+
+I didn't refactor because the tests passed and I was nervous about
+regressions late in the port. It's a smell. If you ever want to touch
+either, do them together.
+
+#### The `_CURRENT_THREAD` / `_CURRENT_MUTABILITY` context-var stacks
+
+These exist so builtins like `sorted(key=fn)` can call back into the
+evaluator without threading a `Thread` through every builtin's
+signature. They're module-level lists with `with`-block context managers
+pushing and popping.
+
+The alternative I considered was making every builtin take an explicit
+`thread` argument. That's mechanical (a few hundred lines of
+boilerplate) but explicit and testable. I picked the global stack
+because it was small, but the right choice was probably the explicit
+threading. Globals make it harder to reason about reentrancy if the
+project ever grows multi-threaded callers, and they make builtin
+signatures lie about their dependencies.
+
+If I were doing this again I'd pay the boilerplate tax up front.
+
+#### NaN as a dict key
+
+The spec wants `d[float("nan")] = v` to update an existing nan entry,
+because all NaN values "compare equal" as dict keys. Python's
+`nan != nan` makes the dict lookup miss; two `float("nan")` instances
+are also not `is`-identical, so Python's identity-shortcut doesn't help
+either.
+
+I solved it by canonicalizing every nan key to a singleton at the
+boundary of `Dict`. Works. But `Dict.__setitem__` and friends growing
+a `_normalize_key` helper for one float quirk is a tell that the Python
+data model is fighting us here, and the same pattern would need to be
+duplicated for any future similar collision (e.g., negative zero, if it
+ever mattered).
+
+I don't have a clean solution. The honest answer is: this is one of the
+places where the "use Python natives" decision shows its seams.
+
+#### Stack frame growth in deep code paths
+
+Recursive descent in the parser, recursive evaluation, recursive
+JSON encoding/decoding — all of it lives on Python's stack with the
+default 1000-frame limit. I added explicit depth caps in JSON to defuse
+adversarial input. The parser and evaluator don't have caps, so a
+sufficiently deep program will blow the stack rather than report an
+"input too deeply nested" EvalError. Probably fine in practice — both
+references have the same problem — but worth flagging as a known sharp
+edge.
 
 ### What I'd do differently next time
 
 - **Run the reference implementation as a CLI from day one.** Most
-  behavioral questions ("does string iterate?", "does float() reject
-  NaN?") are 5-second shell commands. I read the Java source for them
-  instead.
-- **Defer wording alignment until after each chunk file's *semantics*
-  pass.** Mixing semantic fixes and wording fixes loses time.
-- **Don't write 900-line files.** `evaluator.py` got too big. Splitting
-  expression eval, statement eval, arithmetic helpers, and call
-  dispatch into separate files would help navigation.
-- **Single journal file from the start.** Splitting plan and status
-  into separate files meant they drifted; the merge at the end was
-  overdue.
-- **Type-check earlier.** Pyright caught real issues in test code that
-  had been there for weeks. Pinning the patch version is the right
-  move — type checkers' updates are otherwise a constant source of
-  surprise diffs.
+  behavioral questions ("does string iterate?", "does `float()` reject
+  NaN?", "what does `print()` output to?") are five-second shell
+  commands. I read the Java source for them and got some wrong.
+- **Defer wording alignment until each chunk file's semantics pass.**
+  Then do a separate sweep where matching strings is the only goal.
+  Don't mix the two.
+- **Don't write 900-line files.** `evaluator.py` got too big to
+  navigate. Split expression eval, statement eval, arithmetic helpers,
+  and call dispatch into separate modules. Same probably applies to
+  `parser.py`. The cost of extra files is much lower than the cost of
+  scrolling.
+- **Type-check from Phase 1, not Phase 14.** Pyright caught real issues
+  in test code that had been there for weeks. The version pin you
+  suggested is the right move — type checkers update constantly and
+  unpinned upgrades produce diffs that have nothing to do with your
+  code.
+- **Single journal file from the start.** `ROADMAP.md` and `STATUS.md`
+  drifted from each other and the merge was overdue. One file is one
+  source of truth.
+- **Wire cross-validation in Phase 1.** Even with a smaller program
+  set, having "does the reference agree?" available as a quick check
+  during development would have caught the print-stream divergence
+  weeks earlier.
+- **Pick the file split before writing.** The natural shape of an
+  evaluator is statement evaluation, expression evaluation, value-level
+  helpers (arithmetic, comparison, indexing), and call dispatch. I wrote
+  them as one file because Phase 5+6 was a single push; that's a
+  reasonable cadence but the resulting file is too big.
 
 ### On the project shape
 
-A port like this is unusually well-suited to LLM-driven development.
-The reference is in version control, the test suite is unambiguous,
-the spec is short, and "did it work" is a function call. There's almost
-no irreversible design judgment required — just careful reading and
-translation. Compare to greenfield design where every decision is
-reversible and the cost of being wrong is high. Ports of
-well-specified languages with conformance suites seem near-ideal as
-agent tasks.
+One subjective observation, since you said you were writing a post:
 
-The phase-driven structure also kept me from rabbit-holing. Each phase
-had a clear "done" criterion (tests pass, conformance flips); without
-that I'd have spent days in `evaluator.py` polishing the comprehension
-code instead of moving to builtins.
+A port like this is unusually well-suited to LLM-driven development.
+The reference is in version control, the test suite is unambiguous, the
+spec is short, and "did it work" is a function call. The space of
+correct designs is mostly already explored — you're translating, not
+inventing — and verification is automated.
+
+This is a different kind of task from greenfield design, where every
+decision is reversible at high cost and the agent has to *judge*
+whether something is right rather than *check* it. The way I'd put it:
+in greenfield work the bottleneck is taste, in porting work the
+bottleneck is reading speed and translation accuracy, both of which
+LLMs are pretty good at.
+
+If I were picking projects to throw at agents, I'd look for these
+properties:
+
+- **Reference implementation in source control.** Even imperfect ones
+  beat prose specs.
+- **Conformance suite or comparable test corpus.** A high-volume way to
+  ask "did I break it?" without having to design tests yourself.
+- **Short spec.** Long specs invite over-implementation; short ones
+  force the agent to use the reference for ambiguous cases, which is
+  what you want.
+- **Phased decomposition into observable milestones.** Lexer →
+  parser → evaluator is the canonical example. Each phase ends with a
+  test you can run. Without that, agents (and humans) wander.
+- **Permission for documented divergence.** "Match exactly" is
+  open-ended; "match exactly except for these three settled
+  divergences" gives an agent something to bounce off when the
+  reference's choices are awkward in the target language. The
+  Architectural Decisions section of `CLAUDE.md` was load-bearing here.
+
+The combination of those properties is rare in real projects but very
+common in language ports. That's probably why the LLM-port-of-X genre
+keeps showing up; it's a sweet spot.
+
+The other thing I'd note for the post: the agent rhythm that worked
+well was "land a phase, run tests, commit with a message that reads
+like a tutorial paragraph, push, repeat." Not because the commits were
+the deliverable, but because writing the commit message forced me to
+articulate what changed and why, which was a useful discipline. A
+hundred-commit history where each message describes one self-contained
+idea is much easier to review than a five-commit "phases 1-7" mass.
+
+### A note to whoever resumes this
+
+There's still work to do, even with the spec push landed:
+
+- The format-string consolidation mentioned above.
+- The `_CURRENT_THREAD` removal in favor of explicit threading.
+- Splitting `evaluator.py` into 3-4 files.
+- Possibly: a real `assert.star` module so we can run starlark-go's
+  testdata too, not just Bazel's `ScriptTest`-style files.
+- The four xfail conformance files are *not* worth the work — they
+  require giving up the "Python natives" decision and we shouldn't.
+  Keep them as documented divergences.
+
+The conformance dashboard is at 34/38 with cross-validation 23/23
+green. Nothing in the codebase should require deep reading to pick up
+again; `docs/README.md` is the entry point.
