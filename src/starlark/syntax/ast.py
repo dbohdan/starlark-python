@@ -11,8 +11,12 @@ attachments. The lexer also doesn't emit the corresponding tokens.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .tokens import TokenKind
+
+if TYPE_CHECKING:
+    from .resolver import Binding
 
 # --------------------------------------------------------------------- bases
 
@@ -57,7 +61,7 @@ class StringLiteral(Expression):
 class Identifier(Expression):
     name: str
     # Set by the Resolver. None means "not resolved" (e.g., parser-only run).
-    binding: object | None = None
+    binding: "Binding | None" = None
 
 
 # ------------------------------------------------------------------ operators
@@ -125,7 +129,7 @@ ComprehensionClause = ComprehensionClauseFor | ComprehensionClauseIf
 @dataclass(slots=True)
 class Comprehension(Expression):
     is_dict: bool
-    body: object  # Expression for list comp; DictEntry for dict comp.
+    body: "Expression | DictEntry"  # Expression for list comp; DictEntry for dict comp.
     clauses: list[ComprehensionClause]
     # Filled by the Resolver:
     locals: list[str] = field(default_factory=list)

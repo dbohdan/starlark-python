@@ -16,7 +16,7 @@ error (bad type, division by zero, frozen mutation, etc.).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeGuard
 
 from ..syntax import ast
 from ..syntax.location import FileLocations, Position
@@ -462,11 +462,11 @@ def _unop(op: TokenKind, x: Any) -> Any:
 # ---------------------------------------------------------------- arithmetic
 
 
-def _is_int(v: Any) -> bool:
+def _is_int(v: Any) -> TypeGuard[int]:
     return isinstance(v, int) and not isinstance(v, bool)
 
 
-def _is_num(v: Any) -> bool:
+def _is_num(v: Any) -> TypeGuard[int | float]:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
@@ -924,11 +924,13 @@ def _eval_clauses(
     if i == len(clauses):
         if expr.is_dict:
             entry = expr.body
+            assert isinstance(entry, ast.DictEntry)
             k = _eval_expr(entry.key, frame, thread)
             check_hashable(k)
             v = _eval_expr(entry.value, frame, thread)
             result[k] = v
         else:
+            assert isinstance(expr.body, ast.Expression)
             v = _eval_expr(expr.body, frame, thread)
             result.append(v)
         return

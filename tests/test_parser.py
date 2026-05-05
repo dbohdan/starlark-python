@@ -82,16 +82,16 @@ def test_member_and_index():
 def test_slice_full():
     e = parse_expression("a[1:2:3]")
     assert isinstance(e, ast.SliceExpression)
-    assert e.start_index.value == 1
-    assert e.end_index.value == 2
-    assert e.step.value == 3
+    assert isinstance(e.start_index, ast.IntLiteral) and e.start_index.value == 1
+    assert isinstance(e.end_index, ast.IntLiteral) and e.end_index.value == 2
+    assert isinstance(e.step, ast.IntLiteral) and e.step.value == 3
 
 
 def test_slice_partial():
     e = parse_expression("a[:5]")
     assert isinstance(e, ast.SliceExpression)
     assert e.start_index is None
-    assert e.end_index.value == 5
+    assert isinstance(e.end_index, ast.IntLiteral) and e.end_index.value == 5
     assert e.step is None
 
 
@@ -183,6 +183,7 @@ def test_for_statement():
 
 def test_for_tuple_vars():
     [stmt] = parse_or_raise("for k, v in items:\n    pass\n")
+    assert isinstance(stmt, ast.ForStatement)
     assert isinstance(stmt.vars, ast.ListExpression)
     assert stmt.vars.is_tuple
 
@@ -213,6 +214,7 @@ def test_break_continue_pass():
         "    else:\n"
         "        pass\n"
     )
+    assert isinstance(for_stmt, ast.ForStatement)
     body = for_stmt.body[0]  # the if
     flow_kinds = []
     cur = body
@@ -242,12 +244,14 @@ def test_forbidden_keyword_import():
 
 def test_multiline_in_brackets():
     [stmt] = parse_or_raise("x = [\n    1,\n    2,\n    3,\n]\n")
+    assert isinstance(stmt, ast.AssignmentStatement)
     assert isinstance(stmt.rhs, ast.ListExpression)
     assert len(stmt.rhs.elements) == 3
 
 
 def test_unparenthesized_tuple_assignment():
     [stmt] = parse_or_raise("a, b = 1, 2\n")
+    assert isinstance(stmt, ast.AssignmentStatement)
     assert isinstance(stmt.lhs, ast.ListExpression)
     assert stmt.lhs.is_tuple
     assert isinstance(stmt.rhs, ast.ListExpression)

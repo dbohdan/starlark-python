@@ -44,6 +44,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _run_go(path: Path) -> tuple[int, str]:
+    assert STAR_BIN is not None  # the pytestmark skip guarantees this
     p = subprocess.run(
         [STAR_BIN, str(path)],
         capture_output=True,

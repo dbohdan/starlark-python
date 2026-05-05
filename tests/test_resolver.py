@@ -40,8 +40,8 @@ def test_simple_global_assignment():
     for i in find_idents(f.statements):
         if isinstance(i.binding, Binding):
             by_name.setdefault(i.name, []).append(i)
-    assert all(b.binding.scope == Scope.UNIVERSAL for b in by_name["print"])
-    assert all(b.binding.scope == Scope.GLOBAL for b in by_name["x"])
+    assert all(b.binding is not None and b.binding.scope == Scope.UNIVERSAL for b in by_name["print"])
+    assert all(b.binding is not None and b.binding.scope == Scope.GLOBAL for b in by_name["x"])
 
 
 def test_function_locals():
@@ -65,6 +65,7 @@ def test_closure_freevars():
         "    return inner\n"
     )
     outer = f.statements[0]
+    assert isinstance(outer, ast.DefStatement)
     inner = outer.body[1]
     assert isinstance(inner, ast.DefStatement)
     assert "a" in inner.freevars
@@ -117,6 +118,7 @@ def test_for_loop_var_is_local():
         "        print(i)\n"
     )
     def_stmt = f.statements[0]
+    assert isinstance(def_stmt, ast.DefStatement)
     assert "i" in def_stmt.locals
 
 
@@ -140,6 +142,7 @@ def test_load_binding_creates_global():
 def test_lambda_locals():
     f = parse_and_resolve("f = lambda x: x + 1\n")
     assign = f.statements[0]
+    assert isinstance(assign, ast.AssignmentStatement)
     lam = assign.rhs
     assert isinstance(lam, ast.LambdaExpression)
     assert "x" in lam.locals

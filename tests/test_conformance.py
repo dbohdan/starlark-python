@@ -111,7 +111,7 @@ def run_chunk(name: str, chunk: str) -> list[str]:
         if expected and evaluated:
             failures.append(
                 f"{name}: expected error(s) but evaluation succeeded: "
-                + "; ".join(p for _, p in expected)
+                + "; ".join(p.pattern for _, p in expected)
             )
         for line, pat in unmatched:
             failures.append(f"{name}:{line}: expected error matching /{pat}/ not raised")

@@ -1,10 +1,13 @@
-.PHONY: test lint fmt zipapp clean
+.PHONY: test lint typecheck fmt zipapp clean
 
 test:
 	uv run pytest -q
 
 lint:
 	uv run ruff check src tests
+
+typecheck:
+	uv run pyright
 
 fmt:
 	uv run ruff format src tests
