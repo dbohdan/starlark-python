@@ -1,6 +1,6 @@
 """Predeclared builtins for the Bazel-style conformance suite.
 
-These match `reference/src/test/java/net/starlark/java/eval/ScriptTest.java`.
+These match Bazel's `net.starlark.java.eval.ScriptTest`.
 Conformance .star files use them as predeclared globals (not via load()).
 """
 

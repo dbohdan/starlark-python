@@ -55,8 +55,6 @@ interpreter itself.
                               binary; skipped cleanly when not on PATH.
 
     conformance/              38 .star files copied verbatim from Bazel.
-    reference/                Java source from bazelbuild/bazel; kept (or
-                              removed in a clean checkout) for grepping.
 
 ## Public API
 

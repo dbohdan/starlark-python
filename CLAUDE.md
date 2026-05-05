@@ -8,8 +8,11 @@ Orientation for future Claude sessions resuming this port. Read STATUS.md
 A pure-Python tree-walking interpreter for the Starlark configuration
 language. It is a port of Bazel's Java reference implementation.
 
-The Java source lives under `reference/` and is read-only — keep it for
-grepping only. The actual deliverable is `src/starlark/`.
+The Java source from bazelbuild/bazel was kept under `reference/` during
+the initial port; that directory has since been removed. If you need to
+grep the Java reference, fetch it from
+https://github.com/bazelbuild/bazel/tree/master/src/main/java/net/starlark/java
+into a scratch checkout. The actual deliverable lives in `src/starlark/`.
 
 ## Architectural decisions (settled — DO NOT relitigate)
 
@@ -46,7 +49,6 @@ If you want to deviate, write a 3-paragraph analysis in STATUS.md under
 
 ## Layout
 
-    reference/             Java source from bazelbuild/bazel. Reference only.
     conformance/           38 .star test files copied verbatim from Bazel.
     src/starlark/
       __init__.py          Public API (eval(), parse(), etc.)
@@ -92,8 +94,8 @@ The 38 `.star` files come from Bazel's `ScriptTest`. Idioms:
 - `### regex` comments mark **expected error patterns** on that line.
 - Predeclared functions used by the files: `assert_eq`, `assert_`,
   `assert_fails`, `freeze`, `struct`, `mutablestruct`, `int_mul_slow`.
-- See `reference/src/test/java/net/starlark/java/eval/ScriptTest.java` for
-  the canonical implementation of the test driver.
+- See Bazel's `net.starlark.java.eval.ScriptTest` for the canonical
+  implementation of the test driver.
 
 Phase 13 wires `tests/test_conformance.py` to parameterize over these files,
 honoring chunks and expectations. Until then, they're parser/lexer smoke
@@ -103,7 +105,7 @@ tests only.
 
 When unsure about an edge case:
 1. https://github.com/bazelbuild/starlark/blob/master/spec.md
-2. The Java reference under `reference/`
+2. The Java reference at https://github.com/bazelbuild/bazel/tree/master/src/main/java/net/starlark/java
 3. starlark-go's behavior (run via `starlark` CLI if available)
 4. Ask the user.
 

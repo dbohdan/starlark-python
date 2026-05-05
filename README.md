@@ -90,7 +90,6 @@ reference's exact error wording for these checks; they are listed in
 
 ## Layout
 
-    reference/    Java source from bazelbuild/bazel, kept for grepping.
     conformance/  .star conformance tests, copied verbatim from Bazel.
     src/starlark/ The actual port.
       syntax/     lexer, parser, AST, resolver
