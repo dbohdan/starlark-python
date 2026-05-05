@@ -402,3 +402,102 @@ Notes / clarifications:
 ## Decisions Pending
 
 (none)
+
+## Retrospective
+
+Brief notes from the agent (Claude) at the end of the port, intended as
+input for a write-up of the project.
+
+### What worked
+
+- **Phases + conformance dashboard.** The 14-phase plan plus
+  `tests/test_conformance.py` as a progress dial was the engine of this
+  port. I never had to hold the whole port in my head; each phase had a
+  small Java surface to read and a clear test delta. Watching the xfail
+  count drop on every iteration was both a forcing function and
+  motivation.
+
+- **Python natives where they fit.** Using `int`, `str`, `tuple`,
+  `bool`, `None` directly — instead of wrapping every value — saved
+  maybe a thousand lines of plumbing. Equality, hashing, repr, and
+  arithmetic Just Work. The price is two real divergences (arbitrary-
+  precision int, code-point string indexing) and one quirk (`True == 1`
+  is False in Starlark, so `equal()` overrides). The trade was clearly
+  worth it.
+
+- **`Mutability` as a token.** Cleanest part of the port. One per
+  `Module`, every mutable holds a reference, freeze is O(1). The Java
+  reference's design ported straight across.
+
+- **Cross-validation against starlark-go.** Cheap, catches real bugs.
+  `print()`-to-stderr wasn't in any unit test I'd written; the
+  cross-validator surfaced it immediately. Should have wired it up
+  earlier — I had the binary on PATH for the last quarter of the
+  project but only used it for spot-checks until the final push.
+
+- **`xfail` as a progress mechanism.** `XFAIL_STRICT = False` during
+  the spec push (so xpasses showed up as cues to remove the file from
+  the list), then `XFAIL_STRICT = True` once curated, kept the suite
+  honest.
+
+### What was annoying
+
+- **Error-message wording is half the conformance suite's surface.**
+  A meaningful chunk of failures aren't testing semantics — they're
+  testing exact strings the Java reference happens to emit. The xfail
+  review forced me to separate "real spec bug" from "wording" before
+  grinding through the wording, which was the right move; doing both
+  in the same pass would have been faster but shallower on actual
+  semantics.
+
+- **Two format-string implementations.** `%`-formatting (in
+  `evaluator._str_format`) and `.format()` (in
+  `string_methods._format_impl`) ended up as parallel parsers that
+  reject different things. They should share a tokenizer. Not refactored
+  for fear of regressions, but it's a smell.
+
+- **The `_CURRENT_THREAD` / `_CURRENT_MUTABILITY` context-var stacks**
+  are ugly. They exist so builtins like `sorted(key=fn)` can call back
+  into the evaluator without threading a `Thread` through every builtin
+  signature. Threading it through explicitly would have been
+  mechanical but cleaner.
+
+- **NaN as a dict key.** The spec wants `d[float("nan")] = v` to update
+  an existing nan entry. Python's `nan != nan` makes dict lookups miss.
+  Canonicalizing every nan key to a singleton works, but the fact that
+  `Dict` grew a `_normalize_key` helper for one corner is a tell.
+
+### What I'd do differently next time
+
+- **Run the reference implementation as a CLI from day one.** Most
+  behavioral questions ("does string iterate?", "does float() reject
+  NaN?") are 5-second shell commands. I read the Java source for them
+  instead.
+- **Defer wording alignment until after each chunk file's *semantics*
+  pass.** Mixing semantic fixes and wording fixes loses time.
+- **Don't write 900-line files.** `evaluator.py` got too big. Splitting
+  expression eval, statement eval, arithmetic helpers, and call
+  dispatch into separate files would help navigation.
+- **Single journal file from the start.** Splitting plan and status
+  into separate files meant they drifted; the merge at the end was
+  overdue.
+- **Type-check earlier.** Pyright caught real issues in test code that
+  had been there for weeks. Pinning the patch version is the right
+  move — type checkers' updates are otherwise a constant source of
+  surprise diffs.
+
+### On the project shape
+
+A port like this is unusually well-suited to LLM-driven development.
+The reference is in version control, the test suite is unambiguous,
+the spec is short, and "did it work" is a function call. There's almost
+no irreversible design judgment required — just careful reading and
+translation. Compare to greenfield design where every decision is
+reversible and the cost of being wrong is high. Ports of
+well-specified languages with conformance suites seem near-ideal as
+agent tasks.
+
+The phase-driven structure also kept me from rabbit-holing. Each phase
+had a clear "done" criterion (tests pass, conformance flips); without
+that I'd have spent days in `evaluator.py` polishing the comprehension
+code instead of moving to builtins.
