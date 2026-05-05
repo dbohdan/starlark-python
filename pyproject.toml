@@ -7,6 +7,13 @@ requires-python = ">=3.11"
 license = { file = "LICENSE" }
 dependencies = []
 
+[project.optional-dependencies]
+dev = [
+    "pyright==1.1.409",
+    "pytest>=7",
+    "ruff>=0.15,<0.16",
+]
+
 [project.scripts]
 starlark-python = "starlark.cmd:main"
 
@@ -16,13 +23,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/starlark"]
-
-[tool.uv]
-dev-dependencies = [
-    "pyright==1.1.409",
-    "pytest>=7",
-    "ruff>=0.15,<0.16",
-]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

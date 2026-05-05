@@ -115,7 +115,7 @@ name = "starlark"
 version = "0.0.0"
 source = { editable = "." }
 
-[package.dev-dependencies]
+[package.optional-dependencies]
 dev = [
     { name = "pyright" },
     { name = "pytest" },
@@ -123,13 +123,12 @@ dev = [
 ]
 
 [package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pyright", specifier = "==1.1.409" },
-    { name = "pytest", specifier = ">=7" },
-    { name = "ruff", specifier = ">=0.15,<0.16" },
+requires-dist = [
+    { name = "pyright", marker = "extra == 'dev'", specifier = "==1.1.409" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15,<0.16" },
 ]
+provides-extras = ["dev"]
 
 [[package]]
 name = "typing-extensions"
