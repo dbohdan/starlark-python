@@ -315,7 +315,7 @@ return StarlarkList(items, _mut())
 
 ## Conformance suite workflow
 
-1. Run `make test` — failures appear in `tests/test_conformance.py`.
+1. Run `poe test` — failures appear in `tests/test_conformance.py`.
 2. To debug one file, drop into a Python REPL:
 
    ```python
@@ -336,12 +336,3 @@ return StarlarkList(items, _mut())
 
 3. Once a file passes, remove it from `XFAIL_FILES` in
    `tests/test_conformance.py`.
-
-## Build & release
-
-- `make test`        — run the full pytest suite (~1.5 s).
-- `make lint`        — ruff.
-- `make typecheck`   — pyright.
-- `make fmt`         — ruff format.
-- `make zipapp`      — produce `./starlark-python.pyz` (~560 KB).
-- `make clean`       — wipe build artifacts.

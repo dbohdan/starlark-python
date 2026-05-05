@@ -6,35 +6,35 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 keywords = [
-    "configuration",
-    "configuration-language",
-    "dsl",
-    "interpreter",
-    "language",
-    "parser",
-    "sandbox",
-    "starlark",
+  "configuration",
+  "configuration-language",
+  "dsl",
+  "interpreter",
+  "language",
+  "parser",
+  "sandbox",
+  "starlark",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Environment :: Console",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: Implementation :: CPython",
-    "Topic :: Software Development :: Interpreters",
-    "Typing :: Typed",
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Software Development :: Interpreters",
+  "Typing :: Typed",
 ]
 dependencies = []
 
 [project.optional-dependencies]
 dev = [
-    "pyright==1.1.409",
-    "pytest>=7",
-    "ruff>=0.15,<0.16",
+  "pyright==1.1.409",
+  "pytest>=7",
+  "ruff>=0.15,<0.16",
 ]
 
 [project.scripts]
@@ -46,6 +46,58 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/starlark"]
+
+[tool.poe.env]
+"PYTHON_SOURCES" = "src/ tests/"
+
+[tool.poe.tasks.check]
+sequence = ["format", "lint", "typecheck"]
+help = "Run the formatter, then all static checks"
+ignore_fail = "return_non_zero"
+
+[tool.poe.tasks.clean]
+shell = '''
+  rm -rf build dist starlark-python.pyz starlark.pyz
+  find . -type d -name __pycache__ -exec rm -rf {} +
+  rm -rf .pytest_cache .ruff_cache
+'''
+help = "Remove built files"
+
+[tool.poe.tasks.files]
+cmd = "echo ${PYTHON_SOURCES}"
+help = "Print the list of files and directories used for static checks"
+
+[tool.poe.tasks.format]
+cmd = "ruff format ${PYTHON_SOURCES}"
+help = "Run the Ruff formatter"
+
+[tool.poe.tasks.lint]
+cmd = "ruff check ${PYTHON_SOURCES}"
+help = "Run Ruff"
+
+[tool.poe.tasks.starlark-python]
+cmd = "python -m starlark"
+help = "Run starlark-python"
+
+[tool.poe.tasks.test]
+cmd = "pytest -q"
+help = "Run Pytest (not through tox)"
+
+[tool.poe.tasks.zipapp]
+shell = '''
+  rm -rf build/zipapp build/starlark-python.pyz
+  mkdir -p build/zipapp
+  cp -r src/starlark build/zipapp/
+  printf 'import sys\nfrom starlark.cmd import main\nsys.exit(main())\n' > build/zipapp/__main__.py
+  uv run python -m zipapp build/zipapp -o starlark-python.pyz -p '/usr/bin/env python3'
+  echo "Built ./starlark-python.pyz"
+  du -h starlark-python.pyz
+'''
+help = "Build zipapp"
+
+[tool.poe.tasks.typecheck]
+cmd = "pyright ${PYTHON_SOURCES}"
+help = "Run Pyright"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

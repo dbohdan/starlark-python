@@ -11,7 +11,7 @@ Usage:
     starlark-python                                # interactive REPL
 
 The same entry point is reachable as `python starlark-python.pyz` when
-built via `make zipapp`.
+built via `poe zipapp`.
 """
 
 from __future__ import annotations

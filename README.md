@@ -58,7 +58,7 @@ The package installs a `starlark-python` console script.
 It can also be run as a zipapp:
 
 ```sh
-make zipapp                              # builds ./starlark-python.pyz (~560K)
+poe zipapp                               # builds ./starlark-python.pyz (~560K)
 ./starlark-python.pyz -c "1 + 2 * 3"     # 7
 ./starlark-python.pyz path/to/script.star
 ```
@@ -121,12 +121,14 @@ src/starlark/     The actual port.
 
 ## Development
 
+Install [Poe the Poet](https://poethepoet.natn.io/) to run the tasks (`uv tool install poethepoet`, `pipx install poethepoet`).
+
 ```sh
 uv sync           # Install deps
-make test         # ~400 tests, ~2s
-make lint         # Ruff
-make typecheck    # Pyright
-make zipapp       # Build ./starlark-python.pyz
+poe test          # ~400 tests, ~2s
+poe lint          # Ruff
+poe typecheck     # Pyright
+poe zipapp        # Build ./starlark-python.pyz
 ```
 
 `tests/test_cross_validation.py` runs a curated set of programs under both this interpreter and the [starlark-go][starlark-go] CLI and asserts they produce identical output.
