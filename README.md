@@ -112,3 +112,10 @@ make zipapp       # build ./starlark.pyz
 ## License
 
 Apache 2.0. See [`LICENSE`](LICENSE).
+
+This is a derivative work: the lexer, parser, resolver, evaluator, and value
+model are ported from the Java reference implementation maintained by **The
+Bazel Authors** as part of [bazelbuild/bazel][bazel]. The conformance test
+files under [`conformance/`](conformance/) are copied verbatim from that
+project. The original Apache-2.0 copyright and license terms apply to all
+derived material.
