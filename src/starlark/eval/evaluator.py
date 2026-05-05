@@ -16,13 +16,14 @@ error (bad type, division by zero, frozen mutation, etc.).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, TypeGuard
 
 from ..syntax import ast
 from ..syntax.location import FileLocations, Position
 from ..syntax.resolver import Binding, Scope
 from ..syntax.tokens import TokenKind
-from .errors import EvalError
+from .errors import EvalError, StepLimitExceeded
 from .function import StarlarkFunction, bind_arguments
 from .limits import check_container_size, check_repeat
 from .module import Module
@@ -89,6 +90,22 @@ class Thread:
     """Runtime state shared across one evaluation: module, builtins, call stack.
 
     Predeclared and universal envs are read-only dicts (host-supplied).
+
+    Resource limits (all opt-in):
+
+    - `max_steps`: cap on `steps`. When `tick()` would push `steps` over the
+      limit, raises `StepLimitExceeded` (or invokes `on_max_steps` if the
+      host supplied one).
+    - `on_max_steps`: optional `Callable[[Thread], None]` invoked once when
+      the step cap is reached. If it returns normally, `tick()` raises;
+      hosts can use it to surface a richer error or to attribute the abort.
+
+    Step accounting: `tick()` is called at three sites — top of every
+    statement, top of every expression evaluation, and entry of every
+    `call()` invocation. The unit is intentionally coarse (Starlark
+    operations, not Python instructions) and matches starlark-java's
+    documented choice. See `security/threat-model.md` and
+    `security/cost-estimates.md`.
     """
 
     __slots__ = (
@@ -98,8 +115,12 @@ class Thread:
         "loader",
         "locs",
         "max_depth",
+        "max_steps",
         "module",
+        "on_max_steps",
         "predeclared",
+        "steps",
+        "thread_local",
         "universal",
     )
 
@@ -111,6 +132,8 @@ class Thread:
         locs: FileLocations | None = None,
         loader=None,
         max_depth: int | None = None,
+        max_steps: int | None = None,
+        on_max_steps: Callable[[Thread], None] | None = None,
     ) -> None:
         self.module = module
         self.predeclared = predeclared or {}
@@ -128,6 +151,37 @@ class Thread:
         from .limits import MAX_NESTING_DEPTH
         self.depth = 0
         self.max_depth = max_depth if max_depth is not None else MAX_NESTING_DEPTH
+        # CPU-bound counter. `steps` is monotonic; `max_steps=None` disables
+        # the cap. Hosts can read `steps` after evaluation to log the cost
+        # of a configuration. Hot-path: tick() is on every statement/expr/call.
+        self.steps: int = 0
+        self.max_steps: int | None = max_steps
+        self.on_max_steps: Callable[[Thread], None] | None = on_max_steps
+        # Host-attachable state, type-keyed (parallels Java's threadLocal).
+        # Use `thread.thread_local[MyKey] = value` to stash per-evaluation
+        # data; useful for builtins that want to share a cache or report
+        # progress to the host.
+        self.thread_local: dict[Any, Any] = {}
+
+    def tick(self, n: int = 1) -> None:
+        """Charge `n` Starlark operations against the step counter.
+
+        When `max_steps` is set and the new total would exceed it, invokes
+        `on_max_steps(self)` (if set) and then raises `StepLimitExceeded`.
+        The callback is fired once per evaluation; subsequent ticks raise
+        without re-firing it.
+        """
+        self.steps += n
+        if self.max_steps is not None and self.steps > self.max_steps:
+            cb = self.on_max_steps
+            if cb is not None:
+                # Clear before calling so re-entry doesn't re-fire.
+                self.on_max_steps = None
+                cb(self)
+            raise StepLimitExceeded(
+                f"Starlark computation cancelled: too many steps "
+                f"({self.steps} > {self.max_steps})"
+            )
 
 
 # ---------------------------------------------------------------- entry
@@ -153,6 +207,10 @@ def eval_file(file: ast.StarlarkFile, thread: Thread) -> None:
 
 
 def _exec_stmt(stmt, frame: Frame, thread: Thread) -> None:
+    # Step accounting: one charge per statement. _Break/_Continue/_Return
+    # are control-flow signals that re-enter the loop without going through
+    # _exec_stmt, so they don't double-charge.
+    thread.tick()
     if isinstance(stmt, ast.ExpressionStatement):
         _eval_expr(stmt.expression, frame, thread)
         return
@@ -330,6 +388,10 @@ def _assign_to_target(target, value: Any, frame: Frame, thread: Thread) -> None:
 
 
 def _eval_expr(expr, frame: Frame, thread: Thread) -> Any:
+    # Step accounting: one charge per expression node visit. Sub-expressions
+    # tick recursively, so `sum([i for i in range(N)])` charges O(N) rather
+    # than O(1). Without this, a single huge expression would be one step.
+    thread.tick()
     thread.depth += 1
     if thread.depth > thread.max_depth:
         thread.depth -= 1
@@ -887,6 +949,10 @@ def call(
     position: Position | None = None,
 ) -> Any:
     """Call a Starlark callable. Used by builtins too."""
+    # Charge one step per call. This also catches builtin->user callbacks
+    # like `sorted(key=fn)`, which otherwise wouldn't trigger an
+    # _eval_expr tick for the inner call.
+    thread.tick()
     if isinstance(fn, BuiltinFunction):
         try:
             return fn.impl(*positional, **keyword)

@@ -46,4 +46,28 @@ def errorf(template: str, *args: object) -> EvalError:
     return EvalError(template % args if args else template)
 
 
-__all__ = ["CallFrame", "EvalError", "errorf"]
+class ResourceLimitExceeded(EvalError):
+    """Base class for runtime resource-limit errors.
+
+    Hosts can `except ResourceLimitExceeded` to distinguish DoS-style
+    aborts from normal `EvalError`s while still catching either as
+    `EvalError`.
+    """
+
+
+class StepLimitExceeded(ResourceLimitExceeded):
+    """Raised when `Thread.steps` exceeds `Thread.max_steps`."""
+
+
+class AllocLimitExceeded(ResourceLimitExceeded):
+    """Raised when `Thread.allocs` exceeds `Thread.max_allocs`."""
+
+
+__all__ = [
+    "AllocLimitExceeded",
+    "CallFrame",
+    "EvalError",
+    "ResourceLimitExceeded",
+    "StepLimitExceeded",
+    "errorf",
+]

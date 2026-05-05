@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from .eval.builtins import make_universal
-from .eval.errors import EvalError
+from .eval.errors import (
+    AllocLimitExceeded,
+    EvalError,
+    ResourceLimitExceeded,
+    StepLimitExceeded,
+)
 from .eval.evaluator import Thread, eval_file
 from .eval.module import Module
 from .syntax import Lexer, parse, parse_expression, resolve
@@ -14,18 +20,38 @@ from .syntax.errors import StarlarkSyntaxException
 __version__ = "0.0.0"
 
 
-def eval(source: str, filename: str = "<expr>", **env: Any) -> Any:
+def eval(
+    source: str,
+    filename: str = "<expr>",
+    *,
+    max_steps: int | None = None,
+    on_max_steps: Callable[[Thread], None] | None = None,
+    **env: Any,
+) -> Any:
     """Evaluate a Starlark expression and return the resulting value.
 
     Extra keyword args are added to the universal namespace, on top of the
     full set of core builtins (`len`, `range`, `print`, …).
+
+    Resource limits (all default to unlimited):
+
+    - `max_steps`: cap on the number of Starlark operations (statements,
+      expression nodes, calls). Raises `StepLimitExceeded` when exceeded.
+    - `on_max_steps`: optional callback invoked once when the step cap is
+      reached, before `StepLimitExceeded` is raised.
     """
     expr = parse_expression(source, file=filename)
     universal = make_universal()
     universal.update(env)
     module = Module(filename)
     locs = Lexer(source, file=filename).locs
-    thread = Thread(module=module, universal=universal, locs=locs)
+    thread = Thread(
+        module=module,
+        universal=universal,
+        locs=locs,
+        max_steps=max_steps,
+        on_max_steps=on_max_steps,
+    )
     # Wrap as an expression statement to evaluate via eval_file.
     from .syntax import ast as _ast
     file = _ast.StarlarkFile(
@@ -53,7 +79,9 @@ def exec_file(
     *,
     predeclared: dict[str, Any] | None = None,
     universal: dict[str, Any] | None = None,
-    loader=None,
+    loader: Callable[[str], Module] | None = None,
+    max_steps: int | None = None,
+    on_max_steps: Callable[[Thread], None] | None = None,
 ) -> Module:
     """Parse, resolve, and execute `source` as a Starlark file.
 
@@ -61,6 +89,13 @@ def exec_file(
     a module path string (passed to `load(...)`) to a `Module`. Raises
     `StarlarkSyntaxException` for parse/resolve errors and `EvalError` for
     runtime errors.
+
+    Resource limits (all default to unlimited):
+
+    - `max_steps`: cap on the number of Starlark operations (statements,
+      expression nodes, calls). Raises `StepLimitExceeded` when exceeded.
+    - `on_max_steps`: optional callback invoked once when the step cap is
+      reached, before `StepLimitExceeded` is raised.
     """
     file = parse(source, file=filename)
     locs = Lexer(source, file=filename).locs
@@ -78,7 +113,13 @@ def exec_file(
         raise StarlarkSyntaxException(file.errors)
     module = Module(filename)
     thread = Thread(
-        module=module, predeclared=pre, universal=uni, locs=locs, loader=loader
+        module=module,
+        predeclared=pre,
+        universal=uni,
+        locs=locs,
+        loader=loader,
+        max_steps=max_steps,
+        on_max_steps=on_max_steps,
     )
     from .eval.builtins import with_mutability, with_thread
     with with_mutability(module.mutability), with_thread(thread):
@@ -87,8 +128,11 @@ def exec_file(
 
 
 __all__ = [
+    "AllocLimitExceeded",
     "EvalError",
     "Module",
+    "ResourceLimitExceeded",
+    "StepLimitExceeded",
     "Thread",
     "__version__",
     "eval",
