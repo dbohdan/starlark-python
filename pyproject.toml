@@ -33,7 +33,7 @@ dependencies = []
 [project.optional-dependencies]
 dev = [
   "pyright==1.1.409",
-  "pytest>=7",
+  "pytest>=9,<10",
   "ruff>=0.15,<0.16",
 ]
 
@@ -105,3 +105,20 @@ include = ["src", "tests"]
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
 reportMissingTypeStubs = false
+
+[tool.tox]
+requires = ["tox>=4.22"]
+env_list = [
+  "py311",
+  "py312",
+  "py313",
+  "py314",
+  "pypy311",
+]
+
+[tool.tox.env_run_base]
+description = "run tests"
+deps = ["pytest>=8,<9"]
+commands = [
+  ["pytest"],
+]

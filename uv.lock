@@ -125,7 +125,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "pyright", marker = "extra == 'dev'", specifier = "==1.1.409" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9,<10" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15,<0.16" },
 ]
 provides-extras = ["dev"]
