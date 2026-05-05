@@ -177,6 +177,74 @@ matching exit status and stdout. Skip cleanly if absent.
 
 Append-only. Newest entries on top.
 
+### 2026-05-05 — Thread safety, step counter, charge-only heap counter
+
+Acted on the threat-model gap the security reviewers flagged. Four
+phases, each its own commit:
+
+**Phase A — thread safety.** Replaced the three module-level stacks
+(`_CURRENT_THREAD` and `_CURRENT_MUTABILITY` in `eval/builtins.py`,
+`_REPORTERS` in `eval/test_driver.py`) with `contextvars.ContextVar`s.
+Each OS thread sees its own context, so two host threads can call
+`exec_file` concurrently without stomping on each other; nesting
+within one thread uses `Token` save/restore. Originally estimated as
+1–2 days of mechanical work threading an explicit `Thread` parameter
+through ~150 builtin signatures; the `ContextVar` rewrite cut that to
+~30 lines and an hour. Eight tests in `tests/test_thread_safety.py`
+cover parallel `exec_file`, parallel `sorted(key=fn)` callbacks,
+parallel `freeze()`, reporter isolation, nested `exec_file` within a
+thread, and stress sweeps at 2/4/8 workers.
+
+**Phase B — step counter.** Added `Thread.steps`, `Thread.max_steps`,
+`Thread.on_max_steps`, and a `tick()` method. Charged at the top of
+every statement (`_exec_stmt`), every expression node (`_eval_expr`),
+and every `call()` invocation. New `StepLimitExceeded` subclasses a
+new `ResourceLimitExceeded` (which subclasses `EvalError`), so hosts
+can catch DoS-style aborts as a single category. The `on_max_*`
+callbacks are go-style: invoked once before the raise; can pre-empt
+the default raise with a custom exception. Eleven tests; the unit is
+intentionally coarse and matches starlark-java's documented choice.
+
+**Phase C — charge-only heap counter.** Added `Thread.allocs`,
+`Thread.max_allocs`, `Thread.on_max_allocs`, and `add_allocs()`.
+Charged in every container constructor (list / dict / set / range),
+every mutating `append`/`extend`/`update`/`add`, and every `+`/`*`
+that produces a new container or string. Sizes are approximate
+constants in `eval/limits.py`, calibrated from `sys.getsizeof` on
+64-bit CPython 3.11 and rounded. The counter is **charge-only**: no
+refund on GC, so it bounds *cumulative allocation* rather than
+*live memory*. Hosts size `max_allocs` at 2–4× the expected
+steady-state working set. Nineteen tests; new `AllocLimitExceeded`
+subclasses `ResourceLimitExceeded`.
+
+I considered high-water tracking via `weakref.finalize` and rejected
+it: GC timing makes the bound non-deterministic, cycles defeat
+refcount release, native containers (str/tuple) can't accept
+weakrefs, and every new wrapper type would have to think about the
+finalize protocol. Charge-only has none of these costs and bounds the
+worst-case DoS pattern just as well; the trade-off is documented in
+`security/cost-estimates.md`.
+
+**Phase D — docs.** Rewrote `security/threat-model.md` to document
+the new opt-in API; rewrote `security/cost-estimates.md` as a
+retrospective comparing estimate to actual; attached `Module.thread`
+so hosts can read `module.thread.steps`/`.allocs` after a successful
+run. Linked the threat model from the root `README.md` and added a
+"Resource limits" section to `docs/README.md`.
+
+API mirrors starlark-go closest: cap-style with optional `on_max_*`
+callback (None = unlimited default), counters as public monotonic
+fields. Errors form the `EvalError` ← `ResourceLimitExceeded` ←
+{`StepLimitExceeded`, `AllocLimitExceeded`} hierarchy.
+
+The threat-model rewrite also separates "DoS-style malicious values"
+(which we mitigate) from "deliberate misconfiguration" (which no
+config format can defend against — the host is responsible for
+parsing freeform output into validated structs). Earlier wording
+conflated the two and oversold what an interpreter alone can do.
+
+494 passed (up from 455), 4 xfailed. Pyright clean, ruff clean.
+
 ### 2026-05-04 — HISTORY.md consolidation
 
 Merged the previous `ROADMAP.md` (the original phase plan) and `STATUS.md`

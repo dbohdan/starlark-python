@@ -110,12 +110,13 @@ starlark.eval("len('hello')")            # 5
 starlark.eval("json.encode([1, 2])")     # '[1,2]'
 ```
 
-### `starlark.exec_file(source, filename="<file>", *, predeclared=None, universal=None, loader=None) -> Module`
+### `starlark.exec_file(source, filename="<file>", *, predeclared=None, universal=None, loader=None, max_steps=None, on_max_steps=None, max_allocs=None, on_max_allocs=None) -> Module`
 
 Parse, resolve, and execute `source` as a Starlark file. Returns the
 populated `Module`. `predeclared` adds host-supplied names visible to
 this file only; `universal` adds names to the read-only universe;
-`loader` resolves `load()` statements.
+`loader` resolves `load()` statements. The `max_*` / `on_max_*` kwargs
+configure the opt-in resource limits — see "Resource limits" below.
 
 ```python
 m = starlark.exec_file('''
@@ -150,6 +151,84 @@ Raised for any runtime semantic error (type mismatch, division by zero,
 frozen mutation, undefined name, etc.). Carries `message: str` and
 `frames: list[CallFrame]` for traceback rendering.
 
+### `starlark.ResourceLimitExceeded` / `StepLimitExceeded` / `AllocLimitExceeded`
+
+`StepLimitExceeded` and `AllocLimitExceeded` both subclass
+`ResourceLimitExceeded`, which subclasses `EvalError`. Existing
+`except EvalError` handlers catch them; hosts that want to distinguish
+"DoS-style abort" from a normal Starlark error catch
+`ResourceLimitExceeded`. See "Resource limits" below.
+
+## Resource limits
+
+Off by default. Hosts that accept untrusted Starlark configure them
+via `exec_file` / `eval` kwargs:
+
+```python
+m = starlark.exec_file(
+    src,
+    max_steps=10_000_000,                # CPU bound (Starlark operations)
+    max_allocs=64 * 1024 * 1024,         # memory bound, approximate
+    on_max_steps=lambda t: log(f"step cap at {t.steps}"),
+    on_max_allocs=lambda t: log(f"alloc cap at {t.allocs} bytes"),
+)
+print(m.thread.steps, m.thread.allocs)   # readable after a successful run
+```
+
+### Step counter
+
+`Thread.steps` is a monotonic counter; `Thread.max_steps` is the cap
+(`None` = unlimited). On excess, raises `StepLimitExceeded`. Charged at
+three sites: top of every statement (`_exec_stmt`), top of every
+expression node (`_eval_expr`), and entry of every call (`call()`).
+
+The unit is intentionally coarse — Starlark operations, not Python
+instructions or bytecode — and matches starlark-java's documented
+choice. Sub-expressions tick recursively, so
+`sum([i for i in range(N)])` is bounded by O(N), not O(1).
+
+It is *not* a hard CPU bound: a single big builtin like
+`sorted(huge_list)` does O(N log N) Python-level work for one step
+charge. Combine with `resource.setrlimit` or a subprocess for a hard
+ceiling.
+
+### Heap counter (charge-only)
+
+`Thread.allocs` is a monotonic byte counter; `Thread.max_allocs` is
+the cap (`None` = unlimited). On excess, raises `AllocLimitExceeded`.
+Charged in every container constructor, every mutating
+`append`/`extend`/`update`/`add`, and every `+`/`*` that produces a
+new container or string. Sizes are approximate constants in
+`eval/limits.py`.
+
+The counter is **charge-only**: values that go out of scope are not
+refunded. The bound it expresses is *cumulative allocation*, not
+*live memory*. A program that allocates 64 MB in scratch values and
+lets the GC reclaim them will still report 64 MB used. Size
+`max_allocs` at 2–4× the expected steady-state working set.
+
+### `on_max_*` callback semantics
+
+Each `on_max_*` callback is invoked **once**, before the
+corresponding `*LimitExceeded` is raised. The callback can:
+
+- Return normally (the default raise still fires).
+- Raise its own exception (pre-empts the default raise; the host
+  sees the custom exception).
+- Mutate the `Thread` (e.g. log, increment a host metric).
+
+Subsequent overruns within the same evaluation do not re-fire the
+callback — it's a one-shot.
+
+### Threat model
+
+[`security/threat-model.md`](../security/threat-model.md) documents
+the full sandbox boundary: what the interpreter defends against (no
+filesystem / network / subprocess / Python introspection, concurrent
+use is safe), what the opt-in counters do and don't promise, and the
+recommended host-side belt-and-braces (run in a subprocess with
+`resource.setrlimit`).
+
 ## Loader protocol
 
 `Loader` is just `Callable[[str], Module]`. Pass it as `loader=` to
@@ -172,15 +251,16 @@ The Bazel conformance suite uses predeclared functions: `assert_eq`,
 unless the host explicitly passes them via `predeclared=`.
 
 ```python
-from starlark.eval.test_driver import make_predeclared, push_reporter, pop_reporter
+from starlark.eval.test_driver import make_predeclared, with_reporter
 
-reporter = push_reporter()
-try:
+with with_reporter() as reporter:
     starlark.exec_file("assert_eq(1, 2)", predeclared=make_predeclared())
     print(reporter.errors)   # ['assert_eq: 1 != 2']
-finally:
-    pop_reporter()
 ```
+
+`push_reporter` / `pop_reporter` exist for backwards compatibility but
+`with_reporter` is the preferred form — both are thread-safe under
+nesting.
 
 ## Adding a builtin
 
@@ -209,8 +289,10 @@ def s_shout(self, suffix=""):
 ```
 
 For builtins that need to call back into Starlark (e.g. `key=` callbacks)
-use `_call_starlark(fn, *args)` from `eval.builtins`. It uses the current
-Thread context, which the evaluator pushes for you on every call.
+use `_call_starlark(fn, *args)` from `eval.builtins`. It reads the
+current `Thread` from the `_CURRENT_THREAD` context variable, which the
+evaluator sets for the duration of every call. Concurrent evaluations
+in different host threads are isolated automatically.
 
 For builtins that allocate mutables (lists, dicts), call `_mut()` to get
 the current Module's Mutability:

@@ -74,6 +74,21 @@ starlark.exec_file(open("main.star").read(), loader=loader)
 
 `load("foo.star", "bar")` then resolves `foo.star` against `loader`.
 
+## Security
+
+Starlark is a sandboxed language: a `.star` program cannot read or
+write files, open sockets, spawn processes, or reach any Python object
+the host did not explicitly hand it. Optional opt-in resource limits
+(`max_steps`, `max_allocs`) bound CPU and memory for hosts that accept
+untrusted input.
+
+What we defend against, what we do *not* defend against, and the
+public limits API are documented in
+[`security/threat-model.md`](security/threat-model.md). The short
+version: we mitigate DoS-style malicious values; defending against
+deliberately misconfigured (but otherwise valid) values is a host
+responsibility, same as for JSON or YAML.
+
 ## Documented divergences from the Java reference
 
 These are intentional, not bugs:

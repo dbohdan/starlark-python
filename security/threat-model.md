@@ -8,11 +8,29 @@ needs.
 ## What the interpreter defends against
 
 Source files (`.star` programs and the values they construct) are
-**untrusted**. A program may produce malicious *values* — any
-configuration language permits that, since even static JSON can
-declare a billion-element array and YAML has the canonical
-billion-laughs entity-expansion attack. A program **cannot** perform
-malicious actions:
+**untrusted**. The interpreter draws a line between two distinct
+threats often lumped together as "malicious values":
+
+- **DoS-style values.** A program can declare a value whose
+  construction would exhaust CPU or memory — a billion-element list,
+  a deeply nested structure, a tight `for` loop. Every configuration
+  language has this surface: even static JSON can declare a
+  billion-element array, and YAML has the canonical billion-laughs
+  entity-expansion attack. We *do* offer mitigations against this
+  class — see "Always-on defences" and "Bounded-resource modes" below.
+- **Deliberate misconfiguration.** A program can also produce values
+  that are *valid* under the language but *wrong* for the host's
+  business logic — a path traversal, a privileged role name, a URL
+  that points at the attacker's server. **No configuration format can
+  defend against this on its own.** Defending against misconfiguration
+  is a host concern: parse the freeform Starlark output into typed
+  application structs and validate each field against allow-lists,
+  ranges, or domain rules. The interpreter's job is to deliver the
+  raw value safely; the host's job is to decide whether the value is
+  acceptable.
+
+What the interpreter *guarantees* is that running the program cannot
+perform malicious *actions* against the host process:
 
 - **No filesystem read or write.** No builtin opens, reads, writes,
   globs, or stats files. The only filesystem-touching code in the
@@ -62,7 +80,7 @@ import starlark
 mod = starlark.exec_file(
     src,
     max_steps=10_000_000,                  # CPU bound
-    max_allocs=64 * 1024 * 1024,           # 64 MB memory bound
+    max_allocs=64 * 1024 * 1024,           # 64 MB memory bound (approximate)
     on_max_steps=lambda t: log("step limit reached"),  # optional callback
     on_max_allocs=lambda t: log("alloc limit reached"),
 )
@@ -70,6 +88,12 @@ mod = starlark.exec_file(
 # After a successful run hosts can read the cost:
 print(f"used {mod.thread.steps} steps, {mod.thread.allocs} bytes")
 ```
+
+`max_allocs` is **approximate, not precise** — sizes are rounded
+constants, not `sys.getsizeof` results, and the counter is
+charge-only (cumulative allocation, never refunded on GC). It is a
+soft DoS bound, not a hard memory ceiling. See "Heap counter" below
+for the exact semantics.
 
 Both errors subclass `EvalError`, so existing `except EvalError`
 handlers see them. A finer-grained `except` is also possible:
