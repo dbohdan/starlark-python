@@ -1,9 +1,9 @@
 # Threat model
 
-Adapted from a sibling project's template. The intent is to make
-explicit what this interpreter defends against and what it does not, so
-security reviewers don't have to guess and downstream users can decide
-whether this implementation matches their needs.
+The intent is to make explicit what this interpreter defends against
+and what it does not, so security reviewers don't have to guess and
+downstream users can decide whether this implementation matches their
+needs.
 
 ## What the interpreter defends against
 
