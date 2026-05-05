@@ -8,7 +8,7 @@ license = { file = "LICENSE" }
 dependencies = []
 
 [project.scripts]
-starlark = "starlark.cmd:main"
+starlark-python = "starlark.cmd:main"
 
 [build-system]
 requires = ["hatchling"]

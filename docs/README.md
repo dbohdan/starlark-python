@@ -8,7 +8,7 @@ interpreter itself.
 
     src/starlark/
       __init__.py             Public API: eval, exec_file, EvalError, Module, Thread.
-      cmd.py                  Argparse CLI ('starlark' console script & 'python -m starlark').
+      cmd.py                  Argparse CLI ('starlark-python' console script & 'python -m starlark').
       __main__.py             Trampoline so 'python -m starlark' works.
       syntax/                 Source -> AST. Mirrors net.starlark.java.syntax.
         tokens.py             TokenKind enum + Token dataclass.
@@ -227,5 +227,5 @@ return StarlarkList(items, _mut())
 - `make lint`        — ruff.
 - `make typecheck`   — pyright.
 - `make fmt`         — ruff format.
-- `make zipapp`      — produce `./starlark.pyz` (~560 KB).
+- `make zipapp`      — produce `./starlark-python.pyz` (~560 KB).
 - `make clean`       — wipe build artifacts.

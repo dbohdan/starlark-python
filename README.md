@@ -46,13 +46,14 @@ m.globals["z"]  # 120
 
 ## CLI
 
-The package installs a `starlark` console script. It can also be run as a
-zipapp:
+The package installs a `starlark-python` console script. (We picked the
+suffixed name so it doesn't shadow `starlark` from go.starlark.net, which
+we use for cross-validation.) It can also be run as a zipapp:
 
 ```sh
-make zipapp                       # builds ./starlark.pyz (~560K)
-./starlark.pyz -c "1 + 2 * 3"     # 7
-./starlark.pyz path/to/script.star
+make zipapp                              # builds ./starlark-python.pyz (~560K)
+./starlark-python.pyz -c "1 + 2 * 3"     # 7
+./starlark-python.pyz path/to/script.star
 ```
 
 ## load() and the host API
@@ -105,7 +106,7 @@ reference's exact error wording for these checks; they are listed in
 uv sync           # install deps
 make test         # 369 tests, ~1s
 make lint         # ruff
-make zipapp       # build ./starlark.pyz
+make zipapp       # build ./starlark-python.pyz
 ```
 
 ## License

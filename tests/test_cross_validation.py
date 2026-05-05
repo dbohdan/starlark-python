@@ -17,24 +17,9 @@ import starlark
 from starlark.eval.test_driver import make_predeclared
 
 CONFORMANCE_DIR = Path(__file__).parent.parent / "conformance"
-# Skip our own CLI shim (`./.venv/bin/starlark`) — we want the go reference.
-_candidate = shutil.which("starlark")
-_is_go_starlark = False
-if _candidate:
-    try:
-        out = subprocess.run(
-            [_candidate, "-c", "1+1"], capture_output=True, text=True, timeout=5,
-        )
-        # The go starlark prints `2` only and exits 0; ours does too. The
-        # discriminator is that the go binary doesn't have our copyright header
-        # in --help. Even simpler: skip if the binary path is inside our venv.
-        venv = str(Path(__file__).parent.parent / ".venv")
-        if not _candidate.startswith(venv):
-            _is_go_starlark = True
-    except Exception:
-        pass
-
-STAR_BIN = _candidate if _is_go_starlark else None
+# We install our own CLI as `starlark-python` precisely so this lookup
+# unambiguously finds the go reference (or nothing).
+STAR_BIN = shutil.which("starlark")
 
 
 pytestmark = pytest.mark.skipif(

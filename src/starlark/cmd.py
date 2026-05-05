@@ -1,13 +1,17 @@
 """Command-line interface for the Starlark interpreter.
 
+We deliberately install as `starlark-python` (not `starlark`) so the
+script doesn't shadow go.starlark.net's `starlark` binary, which we want
+to use for cross-validation tests.
+
 Usage:
 
-    starlark [SCRIPT.star]                         # run a file
-    starlark -c "1 + 1"                            # evaluate an expression
-    starlark                                       # interactive REPL
+    starlark-python [SCRIPT.star]                  # run a file
+    starlark-python -c "1 + 1"                     # evaluate an expression
+    starlark-python                                # interactive REPL
 
-When run as a zipapp (`python -m zipapp src/starlark -o starlark.pyz`), the
-same entry point is reachable as `python starlark.pyz`.
+The same entry point is reachable as `python starlark-python.pyz` when
+built via `make zipapp`.
 """
 
 from __future__ import annotations
@@ -23,7 +27,7 @@ from .syntax.errors import StarlarkSyntaxException
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="starlark")
+    parser = argparse.ArgumentParser(prog="starlark-python")
     parser.add_argument(
         "-c",
         dest="expr",
