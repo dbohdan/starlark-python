@@ -67,10 +67,15 @@ def _mut() -> Mutability:
 
 
 def _call_starlark(fn: Any, *args: Any) -> Any:
-    """Invoke a Starlark callable from inside a builtin (e.g., `sorted` key)."""
-    if isinstance(fn, BuiltinFunction):
-        return fn.impl(*args)
+    """Invoke a Starlark callable from inside a builtin (e.g., `sorted` key).
+
+    Goes through evaluator.call() so error wrapping (TypeError -> EvalError,
+    frame pushing, recursion checks) is consistent with normal call sites.
+    """
     if not _CURRENT_THREAD:
+        # Fallback for tests that didn't push a thread context.
+        if isinstance(fn, BuiltinFunction):
+            return fn.impl(*args)
         raise EvalError("cannot call user-defined function from this context")
     from .evaluator import call as _call
     return _call(fn, list(args), {}, _CURRENT_THREAD[-1])
@@ -96,8 +101,10 @@ def _is_int(v: Any) -> bool:
 
 
 def _to_iter(v: Any):
+    # Per the Starlark spec, strings are NOT iterable. Use s.elems() to
+    # iterate over code points.
     if isinstance(v, str):
-        return iter(v)
+        raise EvalError(f"type '{starlark_type(v)}' is not iterable")
     if isinstance(v, (tuple, StarlarkList, Dict, StarlarkSet, Range)):
         return iter(v)
     raise EvalError(f"got value of type '{starlark_type(v)}', want 'iterable'")
@@ -115,7 +122,9 @@ def b_len(x: Any) -> int:
         return len(x)
     if isinstance(x, (tuple, StarlarkList, Dict, StarlarkSet, Range)):
         return len(x)
-    raise EvalError(f"{starlark_type(x)} object has no len()")
+    raise EvalError(
+        f"parameter 'x' got value of type '{starlark_type(x)}', want 'iterable or string'"
+    )
 
 
 def b_bool(x: Any = False) -> bool:
@@ -145,49 +154,92 @@ def b_fail(*args, sep: str = " ") -> None:
 # ---------------------------------------------------------------- numbers
 
 
-def b_int(x: Any = 0, base: Any = None) -> int:
+def b_int(x: Any, base: Any = None) -> int:
     if base is not None:
-        if not isinstance(x, str):
-            raise EvalError("int() base parameter requires a string argument")
         if not _is_int(base):
-            raise EvalError("int() base must be int")
-        try:
-            return int(x.strip(), base)
-        except ValueError:
-            raise EvalError(f"invalid literal for int() with base {base}: {x!r}") from None
+            raise EvalError(
+                f"parameter 'base' got value of type '{starlark_type(base)}', want 'int'"
+            )
+        if not isinstance(x, str):
+            raise EvalError("can't convert non-string with explicit base")
+        return _int_from_string(x, base)
     if isinstance(x, bool):
         return 1 if x else 0
     if isinstance(x, int):
         return x
     if isinstance(x, float):
-        if x != x or x == float("inf") or x == float("-inf"):
-            raise EvalError(f"int() argument is not a finite number: {x}")
+        if x != x:
+            raise EvalError("can't convert float nan to int")
+        if x == float("inf"):
+            raise EvalError("can't convert float +inf to int")
+        if x == float("-inf"):
+            raise EvalError("can't convert float -inf to int")
         return int(x)
     if isinstance(x, str):
-        s = x.strip()
-        sign = ""
-        body = s
-        if body[:1] in ("+", "-"):
-            sign = body[0]
-            body = body[1:]
-        try:
-            if body.startswith(("0x", "0X")):
-                return int(sign + body[2:], 16)
-            if body.startswith(("0o", "0O")):
-                return int(sign + body[2:], 8)
-            if body.startswith(("0b", "0B")):
-                return int(sign + body[2:], 2)
-            return int(s)
-        except ValueError:
-            raise EvalError(f"int() invalid literal: {x!r}") from None
-    raise EvalError(f"int() does not accept {starlark_type(x)}")
+        # Default: base 10. Pass explicit base=0 to auto-detect from prefix.
+        return _int_from_string(x, 10)
+    raise EvalError(
+        f"got value of type '{starlark_type(x)}', want 'string, bool, int, or float'"
+    )
+
+
+def _int_from_string(text: str, base: int) -> int:
+    """Mirror Bazel's int() string parser, including its base/prefix rules."""
+    if base != 0 and not (2 <= base <= 36):
+        raise EvalError(
+            f"invalid base {base} (want 2 <= base <= 36)"
+        )
+    if not text:
+        raise EvalError("empty string")
+    # Note: do not strip whitespace; the spec rejects " 1" and "1 ".
+    if text != text.strip():
+        # Python's int() ignores leading/trailing whitespace; we don't.
+        raise EvalError(f'invalid base-{base or 10} literal: "{text}"')
+    sign = ""
+    body = text
+    if body[:1] in ("+", "-"):
+        sign = body[0]
+        body = body[1:]
+
+    if base == 0:
+        # Auto-detect from prefix.
+        if body.startswith(("0x", "0X")):
+            base, body = 16, body[2:]
+        elif body.startswith(("0o", "0O")):
+            base, body = 8, body[2:]
+        elif body.startswith(("0b", "0B")):
+            base, body = 2, body[2:]
+        elif len(body) > 1 and body[0] == "0" and any(c != "0" for c in body):
+            raise EvalError(
+                f'cannot infer base when string begins with a 0: "{text}"'
+            )
+        else:
+            base = 10
+    else:
+        # Explicit base — only strip a matching prefix.
+        if base == 16 and body.startswith(("0x", "0X")):
+            body = body[2:]
+        elif base == 8 and body.startswith(("0o", "0O")):
+            body = body[2:]
+        elif base == 2 and body.startswith(("0b", "0B")):
+            body = body[2:]
+
+    if not body:
+        raise EvalError(f'invalid base-{base} literal: "{text}"')
+    try:
+        return int(sign + body, base)
+    except ValueError:
+        raise EvalError(f'invalid base-{base} literal: "{text}"') from None
 
 
 def b_float(x: Any = 0.0) -> float:
     if isinstance(x, bool):
         return 1.0 if x else 0.0
     if isinstance(x, (int, float)):
-        return float(x)
+        try:
+            return float(x)
+        except OverflowError:
+            raise EvalError("int too large to convert to float") from None
     if isinstance(x, str):
         s = x.strip().lower()
         if s in ("inf", "+inf", "infinity", "+infinity"):
@@ -197,10 +249,15 @@ def b_float(x: Any = 0.0) -> float:
         if s in ("nan", "+nan", "-nan"):
             return float("nan")
         try:
-            return float(x)
+            f = float(x)
         except ValueError:
-            raise EvalError(f"float() invalid literal: {x!r}") from None
-    raise EvalError(f"float() does not accept {starlark_type(x)}")
+            raise EvalError(f"invalid float literal: {x}") from None
+        if f == float("inf") or f == float("-inf"):
+            raise EvalError("floating-point number too large")
+        return f
+    raise EvalError(
+        f"got value of type '{starlark_type(x)}', want 'string, bool, int, or float'"
+    )
 
 
 def b_abs(x: Any) -> Any:
@@ -238,7 +295,7 @@ def b_tuple(x: Any = ()) -> tuple:
 
 def b_dict(*args, **kwargs) -> Dict:
     if len(args) > 1:
-        raise EvalError("dict() takes at most 1 positional argument")
+        raise EvalError("dict() accepts no more than 1 positional argument")
     d = Dict(mutability=_mut())
     if args:
         a = args[0]
@@ -261,10 +318,12 @@ def b_dict(*args, **kwargs) -> Dict:
     return d
 
 
-def b_set(x: Any = ()) -> StarlarkSet:
-    if x == ():
+def b_set(*args: Any) -> StarlarkSet:
+    if len(args) > 1:
+        raise EvalError("set() accepts no more than 1 positional argument")
+    if not args:
         return StarlarkSet(mutability=_mut())
-    return StarlarkSet(list(_to_iter(x)), _mut())
+    return StarlarkSet(list(_to_iter(args[0])), _mut())
 
 
 def b_range(*args) -> Range:
@@ -350,7 +409,14 @@ def _min_max(args, key, *, _is_min: bool) -> Any:
     best_key = _call_starlark(key, best) if key is not None else best
     for v in items[1:]:
         vk = _call_starlark(key, v) if key is not None else v
-        better = less_than(vk, best_key) if _is_min else less_than(best_key, vk)
+        # Wrap the comparison so error messages report operands in
+        # (running-best, candidate) order, matching the Java reference.
+        try:
+            better = less_than(vk, best_key) if _is_min else less_than(best_key, vk)
+        except EvalError:
+            raise EvalError(
+                f"unsupported comparison: {starlark_type(best_key)} <=> {starlark_type(vk)}"
+            ) from None
         if better:
             best, best_key = v, vk
     return best

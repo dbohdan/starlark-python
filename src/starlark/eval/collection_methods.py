@@ -149,39 +149,138 @@ def st_clear(self: StarlarkSet) -> None:
     self.clear()
 
 
+def _to_set_collection(o: Any):
+    """Iterate `o` as a hashable-element collection. Used by set.update etc."""
+    if isinstance(o, str) or not hasattr(o, "__iter__"):
+        raise EvalError(
+            f"got value of type '{starlark_type(o)}', want a collection of hashable elements"
+        )
+    return iter(o)
+
+
+def st_update(self: StarlarkSet, *others) -> None:
+    """Add every element of `others` to the set in place."""
+    for o in others:
+        for x in _to_set_collection(o):
+            check_hashable(x)
+            self.add(x)
+
+
+def st_pop(self: StarlarkSet) -> Any:
+    """Remove and return the first inserted element. Mirrors starlark-go."""
+    self.mutability.check("set")
+    if len(self) == 0:
+        raise EvalError("set is empty")
+    first = next(iter(self))
+    self.discard(first)
+    return first
+
+
 def st_union(self: StarlarkSet, *others) -> StarlarkSet:
     from .builtins import _mut
     out = StarlarkSet(list(self), _mut())
     for o in others:
-        for x in o:
+        for x in _to_set_collection(o):
+            check_hashable(x)
             out._data[x] = None
     return out
 
 
 def st_intersection(self: StarlarkSet, *others) -> StarlarkSet:
     from .builtins import _mut
+    other_sets = [set(_to_set_collection(o)) for o in others]
     keep: list = []
     for x in self:
-        if all(x in o for o in others):
+        if all(x in o for o in other_sets):
             keep.append(x)
     return StarlarkSet(keep, _mut())
 
 
 def st_difference(self: StarlarkSet, *others) -> StarlarkSet:
     from .builtins import _mut
+    other_sets = [set(_to_set_collection(o)) for o in others]
     keep: list = []
     for x in self:
-        if not any(x in o for o in others):
+        if not any(x in o for o in other_sets):
             keep.append(x)
     return StarlarkSet(keep, _mut())
 
 
-def st_issubset(self: StarlarkSet, other: Any) -> bool:
-    return all(x in other for x in self)
+def st_symmetric_difference(self: StarlarkSet, *others) -> StarlarkSet:
+    if len(others) != 1:
+        raise EvalError("set.symmetric_difference() accepts no more than 1 positional argument")
+    other = others[0]
+    from .builtins import _mut
+    other_list = list(_to_set_collection(other))
+    other_set = set(other_list)
+    keep: list = []
+    for x in self:
+        if x not in other_set:
+            keep.append(x)
+    for x in other_list:
+        check_hashable(x)
+        if x not in self:
+            keep.append(x)
+    return StarlarkSet(keep, _mut())
 
 
-def st_issuperset(self: StarlarkSet, other: Any) -> bool:
-    return all(x in self for x in other)
+def st_intersection_update(self: StarlarkSet, *others) -> None:
+    self.mutability.check("set")
+    other_sets = [set(_to_set_collection(o)) for o in others]
+    keep = [x for x in self if all(x in o for o in other_sets)]
+    self._data.clear()
+    for x in keep:
+        self._data[x] = None
+
+
+def st_difference_update(self: StarlarkSet, *others) -> None:
+    self.mutability.check("set")
+    drop = set()
+    for o in others:
+        drop.update(_to_set_collection(o))
+    keep = [x for x in self if x not in drop]
+    self._data.clear()
+    for x in keep:
+        self._data[x] = None
+
+
+def st_symmetric_difference_update(self: StarlarkSet, *others) -> None:
+    if len(others) != 1:
+        raise EvalError(
+            "set.symmetric_difference_update() accepts no more than 1 positional argument"
+        )
+    other = others[0]
+    self.mutability.check("set")
+    other_list = list(_to_set_collection(other))
+    for x in other_list:
+        check_hashable(x)
+    other_set = set(other_list)
+    keep = [x for x in self if x not in other_set]
+    for x in other_list:
+        if x not in self:
+            keep.append(x)
+    self._data.clear()
+    for x in keep:
+        self._data[x] = None
+
+
+def st_isdisjoint(self: StarlarkSet, *others) -> bool:
+    if len(others) != 1:
+        raise EvalError("set.isdisjoint() accepts no more than 1 positional argument")
+    return not any(x in self for x in _to_set_collection(others[0]))
+
+
+def st_issubset(self: StarlarkSet, *others) -> bool:
+    if len(others) != 1:
+        raise EvalError("set.issubset() accepts no more than 1 positional argument")
+    other_set = set(_to_set_collection(others[0]))
+    return all(x in other_set for x in self)
+
+
+def st_issuperset(self: StarlarkSet, *others) -> bool:
+    if len(others) != 1:
+        raise EvalError("set.issuperset() accepts no more than 1 positional argument")
+    return all(x in self for x in _to_set_collection(others[0]))
 
 
 # ---------------------------------------------------------------- registration
@@ -220,9 +319,16 @@ def register_all() -> None:
         ("discard", st_discard),
         ("remove", st_remove),
         ("clear", st_clear),
+        ("update", st_update),
+        ("pop", st_pop),
         ("union", st_union),
         ("intersection", st_intersection),
+        ("intersection_update", st_intersection_update),
         ("difference", st_difference),
+        ("difference_update", st_difference_update),
+        ("symmetric_difference", st_symmetric_difference),
+        ("symmetric_difference_update", st_symmetric_difference_update),
+        ("isdisjoint", st_isdisjoint),
         ("issubset", st_issubset),
         ("issuperset", st_issuperset),
     ]

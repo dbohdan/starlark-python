@@ -202,15 +202,53 @@ def _exec_assign(stmt: ast.AssignmentStatement, frame: Frame, thread: Thread) ->
         value = _eval_expr(stmt.rhs, frame, thread)
         _assign_to_target(stmt.lhs, value, frame, thread)
         return
-    # Augmented: read LHS, combine, write back. List `+=` mutates in place.
+    # Augmented: read LHS, combine, write back. Some ops mutate in place
+    # rather than creating a new container — list `+=`, dict `|=`, and the
+    # four set inplace operators (`|=`, `&=`, `-=`, `^=`).
     rhs = _eval_expr(stmt.rhs, frame, thread)
     current = _read_target(stmt.lhs, frame, thread)
     if isinstance(current, StarlarkList) and stmt.op == TokenKind.PLUS:
         current.extend(_iterate(rhs))
-        # No re-store needed because list is mutated in place.
+        return
+    if isinstance(current, StarlarkSet) and isinstance(rhs, StarlarkSet) and stmt.op in (
+        TokenKind.PIPE,
+        TokenKind.AMPERSAND,
+        TokenKind.MINUS,
+        TokenKind.CARET,
+    ):
+        _set_inplace(current, rhs, stmt.op)
+        return
+    if isinstance(current, Dict) and isinstance(rhs, Dict) and stmt.op == TokenKind.PIPE:
+        current.mutability.check("dict")
+        for k, v in rhs.items():
+            current[k] = v
         return
     new_value = _binop(stmt.op, current, rhs)
     _assign_to_target(stmt.lhs, new_value, frame, thread)
+
+
+def _set_inplace(s: StarlarkSet, other: StarlarkSet, op: TokenKind) -> None:
+    s.mutability.check("set")
+    if op == TokenKind.PIPE:
+        for x in other:
+            s.add(x)
+    elif op == TokenKind.AMPERSAND:
+        keep = [x for x in s if x in other]
+        s._data.clear()
+        for x in keep:
+            s._data[x] = None
+    elif op == TokenKind.MINUS:
+        for x in list(other):
+            s.discard(x)
+    elif op == TokenKind.CARET:
+        in_other = list(other)
+        keep = [x for x in s if x not in other]
+        for x in in_other:
+            if x not in s:
+                keep.append(x)
+        s._data.clear()
+        for x in keep:
+            s._data[x] = None
 
 
 def _read_target(target, frame: Frame, thread: Thread) -> Any:
@@ -251,10 +289,23 @@ def _assign_to_target(target, value: Any, frame: Frame, thread: Thread) -> None:
         _store_to_target(target, value, frame, thread)
         return
     if isinstance(target, ast.ListExpression):
-        items = list(_iterate(value))
-        if len(items) != len(target.elements):
+        n_targets = len(target.elements)
+        try:
+            items = list(_iterate(value))
+        except EvalError:
+            # Reframe as the assignment-side error wording, including the
+            # arity hint the conformance tests check for.
             raise EvalError(
-                f"unpack: got {len(items)} values, expected {len(target.elements)}"
+                f"got '{starlark_type(value)}' in sequence assignment "
+                f"(want {n_targets}-element sequence)"
+            ) from None
+        if len(items) < n_targets:
+            raise EvalError(
+                f"too few values to unpack (got {len(items)}, want {n_targets})"
+            )
+        if len(items) > n_targets:
+            raise EvalError(
+                f"too many values to unpack (got {len(items)}, want {n_targets})"
             )
         for sub, v in zip(target.elements, items, strict=True):
             _assign_to_target(sub, v, frame, thread)
@@ -304,7 +355,9 @@ def _eval_expr(expr, frame: Frame, thread: Thread) -> Any:
             check_hashable(k)
             v = _eval_expr(entry.value, frame, thread)
             if k in d:
-                raise EvalError(f"duplicate key in dict: {repr_starlark(k)}")
+                raise EvalError(
+                    f"dictionary expression has duplicate key: {repr_starlark(k)}"
+                )
             d[k] = v
         return d
     if isinstance(expr, ast.IndexExpression):
@@ -440,23 +493,23 @@ def _binop(op: TokenKind, a: Any, b: Any) -> Any:
 def _unop(op: TokenKind, x: Any) -> Any:
     if op == TokenKind.MINUS:
         if isinstance(x, bool):
-            raise EvalError(f"unsupported unary operator: -{starlark_type(x)}")
+            raise EvalError(f"unsupported unary operation: -{starlark_type(x)}")
         if isinstance(x, (int, float)):
             return -x
         raise EvalError(f"unsupported unary operator: -{starlark_type(x)}")
     if op == TokenKind.PLUS:
         if isinstance(x, bool):
-            raise EvalError(f"unsupported unary operator: +{starlark_type(x)}")
+            raise EvalError(f"unsupported unary operation: +{starlark_type(x)}")
         if isinstance(x, (int, float)):
             return +x
         raise EvalError(f"unsupported unary operator: +{starlark_type(x)}")
     if op == TokenKind.TILDE:
         if isinstance(x, bool) or not isinstance(x, int):
-            raise EvalError(f"unsupported unary operator: ~{starlark_type(x)}")
+            raise EvalError(f"unsupported unary operation: ~{starlark_type(x)}")
         return ~x
     if op == TokenKind.NOT:
         return not truth(x)
-    raise EvalError(f"unsupported unary operator {op}")
+    raise EvalError(f"unsupported unary operation: {op}")
 
 
 # ---------------------------------------------------------------- arithmetic
@@ -470,9 +523,17 @@ def _is_num(v: Any) -> TypeGuard[int | float]:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def _safe_num_op(op, a, b):
+    """Run a numeric op, translating int-too-large overflow into a clean error."""
+    try:
+        return op(a, b)
+    except OverflowError:
+        raise EvalError("int too large to convert to float") from None
+
+
 def _plus(a: Any, b: Any) -> Any:
     if _is_num(a) and _is_num(b):
-        return a + b
+        return _safe_num_op(lambda x, y: x + y, a, b)
     if isinstance(a, str) and isinstance(b, str):
         return a + b
     if isinstance(a, tuple) and isinstance(b, tuple):
@@ -485,7 +546,7 @@ def _plus(a: Any, b: Any) -> Any:
 
 def _minus(a: Any, b: Any) -> Any:
     if _is_num(a) and _is_num(b):
-        return a - b
+        return _safe_num_op(lambda x, y: x - y, a, b)
     if isinstance(a, StarlarkSet) and isinstance(b, StarlarkSet):
         out = StarlarkSet(mutability=a.mutability)
         for x in a:
@@ -497,7 +558,7 @@ def _minus(a: Any, b: Any) -> Any:
 
 def _multiply(a: Any, b: Any) -> Any:
     if _is_num(a) and _is_num(b):
-        return a * b
+        return _safe_num_op(lambda x, y: x * y, a, b)
     if _is_int(a) and isinstance(b, str):
         _check_repeat(max(0, a), len(b), unit="characters")
         return b * max(0, a)
@@ -532,26 +593,40 @@ def _check_repeat(factor: int, length: int, *, unit: str = "elements") -> None:
 def _div(a: Any, b: Any) -> Any:
     if _is_num(a) and _is_num(b):
         if b == 0:
-            raise EvalError("division by zero")
-        return float(a) / float(b)
+            kind = "floating-point" if isinstance(a, float) or isinstance(b, float) else "integer"
+            raise EvalError(f"{kind} division by zero")
+        try:
+            return float(a) / float(b)
+        except OverflowError:
+            raise EvalError("int too large to convert to float") from None
     raise EvalError(f"unsupported binary operation: {starlark_type(a)} / {starlark_type(b)}")
 
 
 def _floordiv(a: Any, b: Any) -> Any:
     if _is_num(a) and _is_num(b):
         if b == 0:
+            # Floor division always reports "integer division by zero",
+            # regardless of the operand types — see conformance/float.star.
             raise EvalError("integer division by zero")
-        # Match Starlark/Python truncation towards negative infinity for ints,
-        # and use Python's floor for floats. Python's // does this naturally.
-        return a // b
+        # Special case: dividing by ±infinity. Python's `//` returns -1.0 for
+        # `1.0 // -inf`; the Starlark spec wants -0.0 (the floor of the
+        # mathematical quotient). Handle it explicitly.
+        if isinstance(b, float) and (b == float("inf") or b == float("-inf")):
+            # 1/inf -> 0.0; 1/-inf -> -0.0; sign follows a*sign(b).
+            return 0.0 if (a > 0) == (b > 0) else -0.0
+        try:
+            return a // b
+        except OverflowError:
+            raise EvalError("int too large to convert to float") from None
     raise EvalError(f"unsupported binary operation: {starlark_type(a)} // {starlark_type(b)}")
 
 
 def _mod(a: Any, b: Any) -> Any:
     if _is_num(a) and _is_num(b):
         if b == 0:
-            raise EvalError("integer modulo by zero")
-        return a % b
+            kind = "floating-point" if isinstance(a, float) or isinstance(b, float) else "integer"
+            raise EvalError(f"{kind} modulo by zero")
+        return _safe_num_op(lambda x, y: x % y, a, b)
     if isinstance(a, str):
         return _str_format(a, b)
     raise EvalError(f"unsupported binary operation: {starlark_type(a)} %% {starlark_type(b)}")
@@ -590,7 +665,17 @@ def _bitwise(op: TokenKind, a: Any, b: Any) -> Any:
                 if x not in a:
                     out._data[x] = None
             return out
-    raise EvalError(f"unsupported binary operation: {starlark_type(a)} | {starlark_type(b)}")
+    raise EvalError(
+        f"unsupported binary operation: {starlark_type(a)} {_op_symbol(op)} {starlark_type(b)}"
+    )
+
+
+def _op_symbol(op: TokenKind) -> str:
+    return {
+        TokenKind.AMPERSAND: "&",
+        TokenKind.PIPE: "|",
+        TokenKind.CARET: "^",
+    }.get(op, str(op))
 
 
 def _set_op(a: StarlarkSet, b: StarlarkSet, keep) -> StarlarkSet:
@@ -601,20 +686,31 @@ def _set_op(a: StarlarkSet, b: StarlarkSet, keep) -> StarlarkSet:
     return out
 
 
+_SHIFT_LIMIT = 512  # bytes; matches the Java reference's cap (`1 << 512` is OK,
+# `1 << 513` is rejected; the conformance suite tests at 520)
+
+
 def _shift_left(a: Any, b: Any) -> Any:
     if _is_int(a) and _is_int(b):
         if b < 0:
-            raise EvalError("negative shift count")
+            raise EvalError(f"negative shift count: {b}")
+        if b > _SHIFT_LIMIT:
+            raise EvalError(f"shift count too large: {b}")
         return a << b
-    raise EvalError(f"unsupported << between {starlark_type(a)} and {starlark_type(b)}")
+    raise EvalError(
+        f"unsupported binary operation: {starlark_type(a)} << {starlark_type(b)}"
+    )
 
 
 def _shift_right(a: Any, b: Any) -> Any:
     if _is_int(a) and _is_int(b):
         if b < 0:
-            raise EvalError("negative shift count")
+            raise EvalError(f"negative shift count: {b}")
+        # Right shift can never blow up memory; cap left shift only.
         return a >> b
-    raise EvalError(f"unsupported >> between {starlark_type(a)} and {starlark_type(b)}")
+    raise EvalError(
+        f"unsupported binary operation: {starlark_type(a)} >> {starlark_type(b)}"
+    )
 
 
 def _contains(container: Any, item: Any) -> bool:
@@ -663,9 +759,9 @@ def _index_get(obj: Any, idx: Any) -> Any:
         return obj[idx]
     if isinstance(obj, Range):
         if not _is_int(idx):
-            raise EvalError(f"range index must be int, got {starlark_type(idx)}")
+            raise EvalError(f"got {starlark_type(idx)} for sequence index, want int")
         return obj[idx]
-    raise EvalError(f"unsupported indexing on {starlark_type(obj)}")
+    raise EvalError(f"type '{starlark_type(obj)}' has no operator []")
 
 
 def _index_set(obj: Any, idx: Any, value: Any) -> None:
@@ -791,9 +887,22 @@ def call(
             e.push_frame(fn.name, position)
             raise
         except TypeError as e:
-            raise EvalError(str(e)) from None
+            # Translate Python's argument-binding TypeError into something
+            # closer to the Java reference's wording. The raw message looks
+            # like `d_pop() missing 1 required positional argument: 'key'`;
+            # we strip the implementation-detail prefix and the quotes.
+            msg = str(e)
+            if "() " in msg:
+                msg = msg.split("() ", 1)[1]
+            msg = msg.replace("'", "")
+            raise EvalError(msg) from None
     if isinstance(fn, StarlarkFunction):
-        if id(fn) in thread.active:
+        # Recursion check: based on the *syntactic* identity of the def/lambda
+        # AST node, not the StarlarkFunction value, so two closures created
+        # from the same lambda still count as the same function (matches the
+        # Java reference's Y-combinator-rejection behavior).
+        node_id = id(fn.ast_node) if fn.ast_node is not None else id(fn)
+        if node_id in thread.active:
             raise EvalError(f"function '{fn.name}' called recursively")
         locals_ = bind_arguments(fn, positional, keyword)
         # Pull in free variables from closure.
@@ -809,7 +918,7 @@ def call(
             position=position,
         )
         thread.frames.append(new_frame)
-        thread.active.add(id(fn))
+        thread.active.add(node_id)
         try:
             if fn.body_expr is not None:
                 return _eval_expr(fn.body_expr, new_frame, thread)
@@ -823,7 +932,7 @@ def call(
             e.push_frame(fn.name, position)
             raise
         finally:
-            thread.active.discard(id(fn))
+            thread.active.discard(node_id)
             thread.frames.pop()
     raise EvalError(f"'{starlark_type(fn)}' object is not callable")
 
@@ -855,6 +964,7 @@ def _make_function(stmt: ast.DefStatement, frame: Frame, thread: Thread) -> Star
         position=_pos(stmt.start, thread),
         locals=tuple(stmt.locals),
         freevars=tuple(stmt.freevars),
+        ast_node=stmt,
     )
 
 
@@ -876,6 +986,7 @@ def _make_lambda(expr: ast.LambdaExpression, frame: Frame, thread: Thread) -> St
         position=_pos(expr.start, thread),
         locals=tuple(expr.locals),
         freevars=tuple(expr.freevars),
+        ast_node=expr,
     )
 
 
@@ -950,8 +1061,10 @@ def _eval_clauses(
 
 
 def _iterate(value: Any):
+    # Per the Starlark spec, strings are NOT iterable. Use s.elems() to
+    # iterate over a string's code points. (See docs/spec.md §7.)
     if isinstance(value, str):
-        return iter(value)
+        raise EvalError(f"type '{starlark_type(value)}' is not iterable")
     if isinstance(value, (tuple, list, StarlarkList, Dict, StarlarkSet, Range)):
         return iter(value)
     if isinstance(value, dict):
@@ -959,6 +1072,39 @@ def _iterate(value: Any):
     raise EvalError(
         f"got value of type '{starlark_type(value)}', want 'iterable'"
     )
+
+
+def _format_float(x: float, conv: str) -> str:
+    """Format a float with the given conversion, matching Java/Go's output.
+
+    Differences from Python's format():
+    - Inf is rendered "+inf"/"-inf", NaN is "nan".
+    - Integer-valued %g/%G results are suffixed with ".0" so `"%g" % 0`
+      gives "0.0".
+    - %f uses the float's *exact* decimal representation (via Decimal), so
+      `"%f" % 1.23e45` produces all digits the IEEE-754 double encodes
+      rather than truncating at Python's default 6 fractional digits +
+      double precision. Matches Java's BigDecimal-based formatter.
+    """
+    if x != x:
+        return "nan"
+    if x == float("inf"):
+        return "+inf"
+    if x == float("-inf"):
+        return "-inf"
+    if conv in ("f", "F"):
+        from decimal import Decimal
+        # Use the shortest round-trip representation (via repr) rather than
+        # the exact binary value, so `"%f" % 1.23e45` produces the rounded
+        # form Java's BigDecimal-based formatter emits, not the exact
+        # bit-pattern decimal.
+        d = Decimal(repr(x))
+        return f"{d:.6f}"
+    if conv in ("g", "G"):
+        # str(x) and "%g" % x should give the same answer per the spec.
+        from .values import _float_repr
+        return _float_repr(x)
+    return format(x, conv)
 
 
 def _str_format(template: str, arg: Any) -> str:
@@ -998,29 +1144,29 @@ def _str_format(template: str, arg: Any) -> str:
             result.append(str_starlark(a))
         elif conv == "r":
             result.append(repr_starlark(a))
-        elif conv in ("d", "i"):
-            if not _is_int(a):
-                if isinstance(a, float):
-                    a = int(a)
-                else:
-                    raise EvalError(f"%d requires int, got {starlark_type(a)}")
-            result.append(str(a))
-        elif conv == "x":
-            if not _is_int(a):
-                raise EvalError(f"%x requires int, got {starlark_type(a)}")
-            result.append(format(a, "x"))
-        elif conv == "X":
-            if not _is_int(a):
-                raise EvalError(f"%X requires int, got {starlark_type(a)}")
-            result.append(format(a, "X"))
-        elif conv == "o":
-            if not _is_int(a):
-                raise EvalError(f"%o requires int, got {starlark_type(a)}")
-            result.append(format(a, "o"))
+        elif conv in ("d", "i", "x", "X", "o"):
+            if isinstance(a, float):
+                if a != a:
+                    raise EvalError("got nan, want a finite number")
+                if a == float("inf"):
+                    raise EvalError("got +inf, want a finite number")
+                if a == float("-inf"):
+                    raise EvalError("got -inf, want a finite number")
+                a = int(a)
+            elif not _is_int(a):
+                raise EvalError(
+                    f"got {starlark_type(a)} for '%{conv}' format, want int or float"
+                )
+            if conv in ("d", "i"):
+                result.append(str(a))
+            else:
+                result.append(format(a, conv))
         elif conv in ("e", "f", "g", "E", "F", "G"):
             if not _is_num(a):
-                raise EvalError(f"%{conv} requires number, got {starlark_type(a)}")
-            result.append(format(float(a), conv))
+                raise EvalError(
+                    f"got {starlark_type(a)} for '%{conv}' format, want int or float"
+                )
+            result.append(_format_float(float(a), conv))
         elif conv == "c":
             if _is_int(a):
                 result.append(chr(a))

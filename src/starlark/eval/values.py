@@ -198,6 +198,19 @@ class StarlarkList:
 # --------------------------------------------------------------- dict
 
 
+# All NaN instances collapse to this canonical one so they can be used as
+# dict/set keys without the Python-default `nan != nan` quirk preventing
+# lookup. (See the discussion in conformance/float.star.)
+_NAN_KEY = float("nan")
+
+
+def _normalize_key(k: Any) -> Any:
+    """Return `k` with NaN floats canonicalized to a single instance."""
+    if isinstance(k, float) and k != k:
+        return _NAN_KEY
+    return k
+
+
 class Dict:
     """A Starlark dict: an ordered, mutable map. Insertion order preserved."""
 
@@ -211,7 +224,10 @@ class Dict:
         mutability: Mutability | None = None,
     ) -> None:
         # Python 3.7+ dicts preserve insertion order, which matches Starlark.
-        self._data: dict = dict(items) if items else {}
+        self._data: dict = {}
+        if items:
+            for k, v in items.items():
+                self._data[_normalize_key(k)] = v
         self.mutability = mutability if mutability is not None else IMMUTABLE
 
     # ----- read-only
@@ -224,16 +240,17 @@ class Dict:
 
     def __contains__(self, key: Any) -> bool:
         check_hashable(key)
-        return key in self._data
+        return _normalize_key(key) in self._data
 
     def __getitem__(self, key: Any) -> Any:
-        if key not in self._data:
+        nk = _normalize_key(key)
+        if nk not in self._data:
             raise EvalError(f"KeyError: {repr_starlark(key)}")
-        return self._data[key]
+        return self._data[nk]
 
     def get(self, key: Any, default: Any = None) -> Any:
         check_hashable(key)
-        return self._data.get(key, default)
+        return self._data.get(_normalize_key(key), default)
 
     def keys(self) -> list:
         return list(self._data.keys())
@@ -268,35 +285,37 @@ class Dict:
     def __setitem__(self, key: Any, value: Any) -> None:
         self.mutability.check("dict")
         check_hashable(key)
-        self._data[key] = value
+        self._data[_normalize_key(key)] = value
 
     def __delitem__(self, key: Any) -> None:
         self.mutability.check("dict")
-        if key not in self._data:
+        nk = _normalize_key(key)
+        if nk not in self._data:
             raise EvalError(f"KeyError: {repr_starlark(key)}")
-        del self._data[key]
+        del self._data[nk]
 
     def update(self, other) -> None:
         self.mutability.check("dict")
         if isinstance(other, Dict):
             for k, v in other._data.items():
-                self._data[k] = v
+                self._data[_normalize_key(k)] = v
         elif isinstance(other, dict):
             for k, v in other.items():
-                self._data[k] = v
+                self._data[_normalize_key(k)] = v
         else:
             for k, v in other:
                 check_hashable(k)
-                self._data[k] = v
+                self._data[_normalize_key(k)] = v
 
     def setdefault(self, key: Any, default: Any) -> Any:
         check_hashable(key)
         # Always check mutability — a frozen dict rejects setdefault even if
         # the key already exists (matches the Java reference's behavior).
         self.mutability.check("dict")
-        if key in self._data:
-            return self._data[key]
-        self._data[key] = default
+        nk = _normalize_key(key)
+        if nk in self._data:
+            return self._data[nk]
+        self._data[nk] = default
         return default
 
     def pop(self, key: Any, *default) -> Any:
@@ -304,8 +323,9 @@ class Dict:
         # Check mutability before reading: even if key is missing and we'd
         # return the default, calling pop on a frozen dict is an error.
         self.mutability.check("dict")
-        if key in self._data:
-            return self._data.pop(key)
+        nk = _normalize_key(key)
+        if nk in self._data:
+            return self._data.pop(nk)
         if default:
             return default[0]
         raise EvalError(f"KeyError: {repr_starlark(key)}")
@@ -371,7 +391,7 @@ class StarlarkSet:
     def remove_value(self, item: Any) -> None:
         self.mutability.check("set")
         if item not in self._data:
-            raise EvalError(f"item not in set: {repr_starlark(item)}")
+            raise EvalError(f"{repr_starlark(item)} not found")
         del self._data[item]
 
     def clear(self) -> None:
@@ -531,6 +551,10 @@ def equal(a: Any, b: Any) -> bool:
         finally:
             seen.discard(pair)
     if type(a) is type(b):
+        # NaN compares equal to itself in Starlark (identity-based equality
+        # for floats), unlike Python's IEEE-754 default.
+        if isinstance(a, float) and a != a and isinstance(b, float) and b != b:
+            return True
         return a == b
     # bool/int cross: spec says distinct — explicitly check before int/float.
     if isinstance(a, bool) or isinstance(b, bool):
@@ -550,7 +574,7 @@ def less_than(a: Any, b: Any) -> bool:
     # Reject bool vs non-bool numeric per the spec.
     if isinstance(a, bool) or isinstance(b, bool):
         raise EvalError(
-            f"unsupported comparison: {starlark_type(a)} < {starlark_type(b)}"
+            f"unsupported comparison: {starlark_type(a)} <=> {starlark_type(b)}"
         )
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
         # Handle NaN: NaN > everything, NaN == NaN.
@@ -575,11 +599,11 @@ def less_than(a: Any, b: Any) -> bool:
             if not equal(x, y):
                 return less_than(x, y)
         return len(a) < len(b)
-    # Order-independent error message: report the pair sorted by type-name
-    # so that `min(int, string)` and `min(string, int)` give the same text.
-    types = sorted([starlark_type(a), starlark_type(b)])
+    # Preserve operand order so `min(string, int)` differs from
+    # `min(int, string)` in the error message; the spec uses `<=>` to indicate
+    # this is a generic ordered-comparison error, not specifically `<`.
     raise EvalError(
-        f"unsupported comparison: {types[0]} <=> {types[1]}"
+        f"unsupported comparison: {starlark_type(a)} <=> {starlark_type(b)}"
     )
 
 
@@ -648,17 +672,44 @@ def str_starlark(value: Any) -> str:
 
 
 def _float_repr(x: float) -> str:
+    """Render a float using Java/Go's repr conventions.
+
+    The Java reference uses Double.toString, which renders absolute values in
+    [10^-3, 10^7) in fixed notation and elsewhere in scientific. Python's
+    repr() switches at 1e-4 / 1e16 and produces "1e+16" where Java would
+    emit "10000000000000000.0". We follow Java's thresholds.
+    """
     if x != x:  # NaN
         return "nan"
     if x == float("inf"):
         return "+inf"
     if x == float("-inf"):
         return "-inf"
-    # Match Python's float repr but ensure there's a decimal point.
+    if x == 0.0:
+        return "-0.0" if _is_neg_zero(x) else "0.0"
+
+    # Use Python's repr as the basis (it produces the shortest round-trip
+    # representation, same as Java's Double.toString). Then, if Python chose
+    # scientific notation but we're in Java's "fixed range", convert to
+    # fixed form.
     s = repr(x)
-    if "." not in s and "e" not in s and "n" not in s and "i" not in s:
+    if "e" in s or "E" in s:
+        if 1e-3 <= abs(x) < 1e17:
+            from decimal import Decimal
+            d = Decimal(s)
+            s = format(d, "f")
+            if "." not in s:
+                s += ".0"
+        return s
+    # Repr already in fixed form; ensure it has a decimal point.
+    if "." not in s:
         s += ".0"
     return s
+
+
+def _is_neg_zero(x: float) -> bool:
+    import math
+    return x == 0.0 and math.copysign(1.0, x) == -1.0
 
 
 def _str_repr(s: str) -> str:

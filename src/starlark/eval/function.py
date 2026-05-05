@@ -23,6 +23,11 @@ class StarlarkFunction:
     params: list[ast.Parameter]
     body_stmts: list[ast.Statement] | None   # for def
     body_expr: ast.Expression | None         # for lambda
+    # The AST node this function was created from. Used to detect recursion
+    # by *syntactic* identity (two closures from the same lambda are
+    # considered the same function for recursion-check purposes — see the
+    # spec's section on Y combinator).
+    ast_node: ast.DefStatement | ast.LambdaExpression | None = None
     defaults: dict[str, Any] = field(default_factory=dict)
     # Closure environment: a dict of free-variable name -> the dict-cell that
     # holds its value. We keep it as a flat mapping name -> dict (the

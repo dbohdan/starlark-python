@@ -56,7 +56,9 @@ MAX_DEPTH = 256
 # --------------------------------------------------------------- encoder
 
 
-def _encode_value(value: Any, out: list[str], path: str) -> None:
+def _encode_value(value: Any, out: list[str], path: str, depth: int = 0) -> None:
+    if depth > MAX_DEPTH:
+        raise EvalError("nesting depth limit exceeded")
     if value is None:
         out.append("null")
         return
@@ -82,14 +84,16 @@ def _encode_value(value: Any, out: list[str], path: str) -> None:
     if isinstance(value, str):
         out.append(_encode_string(value))
         return
-    if isinstance(value, (StarlarkList, tuple, Range)):
+    if isinstance(value, (StarlarkList, tuple, Range, StarlarkSet)):
         out.append("[")
         first = True
         for i, item in enumerate(value):
             if not first:
                 out.append(",")
             first = False
-            _encode_value(item, out, f"{path}at {_seq_label(value)} index {i}: ")
+            _encode_value(
+                item, out, f"{path}at {_seq_label(value)} index {i}: ", depth + 1
+            )
         out.append("]")
         return
     if isinstance(value, Dict):
@@ -110,7 +114,7 @@ def _encode_value(value: Any, out: list[str], path: str) -> None:
             first = False
             out.append(_encode_string(k))
             out.append(":")
-            _encode_value(value[k], out, f'{path}in dict key "{k}": ')
+            _encode_value(value[k], out, f'{path}in dict key "{k}": ', depth + 1)
         out.append("}")
         return
     # Struct-like: anything with a `fields` dict (mapping str -> value).
@@ -131,17 +135,19 @@ def _encode_value(value: Any, out: list[str], path: str) -> None:
             first = False
             out.append(_encode_string(k))
             out.append(":")
-            _encode_value(fields[k], out, f"{path}in struct field .{k}: ")
+            _encode_value(
+                fields[k], out, f"{path}in struct field .{k}: ", depth + 1
+            )
         out.append("}")
         return
-    if isinstance(value, StarlarkSet):
-        raise EvalError(f"{path}cannot encode {starlark_type(value)} as JSON")
     raise EvalError(f"{path}cannot encode {starlark_type(value)} as JSON")
 
 
 def _seq_label(value: Any) -> str:
     if isinstance(value, tuple):
         return "tuple"
+    if isinstance(value, StarlarkSet):
+        return "set"
     return "list"
 
 
@@ -226,7 +232,7 @@ class _Decoder:
     def _push(self) -> None:
         self.depth += 1
         if self.depth > MAX_DEPTH:
-            raise EvalError(f"JSON nesting too deep (>{MAX_DEPTH})")
+            raise EvalError("nesting depth limit exceeded")
 
     def _pop(self) -> None:
         self.depth -= 1
@@ -460,7 +466,7 @@ def decode(source: Any) -> Any:
 def _indent_value(value: Any, out: list[str], prefix: str, indent: str, depth: int) -> None:
     pad = prefix + indent * depth
     inner_pad = prefix + indent * (depth + 1)
-    if isinstance(value, (StarlarkList, tuple, Range)):
+    if isinstance(value, (StarlarkList, tuple, Range, StarlarkSet)):
         items = list(value)
         if not items:
             out.append("[]")

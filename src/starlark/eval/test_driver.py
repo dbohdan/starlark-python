@@ -135,6 +135,12 @@ def b_mutablestruct(**kwargs) -> Struct:
 
 def b_freeze(*args) -> Any:
     if not args:
+        # No-arg freeze: freeze the current module's mutability so all
+        # values it owns become read-only. Used by the conformance suite
+        # to test frozen-state behavior.
+        from .builtins import _CURRENT_MUTABILITY
+        if _CURRENT_MUTABILITY:
+            _CURRENT_MUTABILITY[-1].freeze()
         return None
     x = args[0]
     if hasattr(x, "mutability"):

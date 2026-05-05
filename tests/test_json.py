@@ -69,11 +69,15 @@ def test_encode_rejects_non_string_dict_keys():
         expr('json.encode({1: "x"})')
 
 
-def test_encode_rejects_callables_and_sets():
+def test_encode_rejects_callables():
     with pytest.raises(EvalError, match="cannot encode builtin_function_or_method"):
         expr("json.encode(len)")
-    with pytest.raises(EvalError, match="cannot encode set"):
-        expr("json.encode(set([1, 2]))")
+
+
+def test_encode_set_as_array():
+    # Sets are encoded as JSON arrays in iteration order, matching starlark-go.
+    assert expr("json.encode(set([3, 1, 2]))") == "[3,1,2]"
+    assert expr("json.encode(set([]))") == "[]"
 
 
 def test_encode_path_in_error():
@@ -158,7 +162,7 @@ def test_decode_rejects_unpaired_surrogate():
 def test_decode_depth_limit_protection():
     # 1000-deep array should be rejected before stack-overflow.
     deep = "[" * 1000 + "]" * 1000
-    with pytest.raises(EvalError, match="too deep"):
+    with pytest.raises(EvalError, match="nesting depth limit exceeded"):
         starlark.eval(f"json.decode({deep!r})")
 
 

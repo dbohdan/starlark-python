@@ -9,9 +9,11 @@ language. Ported from the Java reference implementation that ships with
 
 ## Status
 
-26 of 38 conformance test files passing (68%); the remaining 12 are tracked
-in `tests/test_conformance.py` under `XFAIL_FILES`. See [`STATUS.md`](STATUS.md)
-for the journal and [`ROADMAP.md`](ROADMAP.md) for the implementation plan.
+34 of 38 conformance test files passing (89%); the 4 remaining xfails are
+all documented divergences from the Java reference (UTF-16 string
+indexing, 32-bit `range()` bounds, Bazel-specific `mutablestruct` test
+helper) — see [`docs/README.md`](docs/README.md). [`STATUS.md`](STATUS.md)
+holds the journal; [`ROADMAP.md`](ROADMAP.md) the original plan.
 
 ## Goals
 

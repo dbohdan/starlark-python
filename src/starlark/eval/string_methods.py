@@ -228,25 +228,27 @@ def s_join(s: str, iterable: Any) -> str:
     return s.join(parts)
 
 
-def s_replace(s: str, old: str, new: str, count: Any = None) -> str:
-    if not isinstance(old, str) or not isinstance(new, str):
-        raise EvalError("replace() requires string arguments")
-    if count is None:
-        return s.replace(old, new)
+def s_replace(s: str, old: Any, new: Any, count: Any = -1) -> str:
+    if not isinstance(old, str):
+        raise EvalError(f"got value of type '{_st(old)}' for 'old', want 'string'")
+    if not isinstance(new, str):
+        raise EvalError(f"got value of type '{_st(new)}' for 'new', want 'string'")
+    # count is required to be an int. Bazel rejects None explicitly even though
+    # -1 is the documented default.
     if not isinstance(count, int) or isinstance(count, bool):
-        raise EvalError("replace() count must be an int")
+        raise EvalError(f"parameter 'count' got value of type '{_st(count)}', want 'int'")
     return s.replace(old, new, count)
 
 
-def s_removeprefix(s: str, prefix: str) -> str:
+def s_removeprefix(s: str, prefix: Any) -> str:
     if not isinstance(prefix, str):
-        raise EvalError("removeprefix() requires a string")
+        raise EvalError(f"got value of type '{_st(prefix)}', want 'string'")
     return s[len(prefix):] if s.startswith(prefix) else s
 
 
-def s_removesuffix(s: str, suffix: str) -> str:
+def s_removesuffix(s: str, suffix: Any) -> str:
     if not isinstance(suffix, str):
-        raise EvalError("removesuffix() requires a string")
+        raise EvalError(f"got value of type '{_st(suffix)}', want 'string'")
     return s[:-len(suffix)] if suffix and s.endswith(suffix) else s
 
 
@@ -304,57 +306,124 @@ def s_format(s: str, *args, **kwargs) -> str:
 
 
 def _format_impl(template: str, args: tuple, kwargs: dict) -> str:
+    """str.format implementation matching the spec.
+
+    Field name grammar: digits OR a Python identifier. Anything else inside
+    the braces (`,`, `.`, `[`, `]`, `(`, `)`, `:`, etc.) is rejected with an
+    "Invalid character X inside replacement field" error. The `:` format
+    spec from PEP 3101 is *not* supported (Starlark spec doesn't include it).
+    """
+    from .values import repr_starlark, str_starlark
+
     out: list[str] = []
     i = 0
     n = len(template)
+    # Track whether positional fields have used the implicit (`{}`) form or
+    # the explicit (`{0}`) form. Mixing is rejected.
+    seen_implicit = False
+    seen_explicit_positional = False
     auto_index = 0
+
     while i < n:
         c = template[i]
         if c == "{":
+            # `{{` -> literal `{`.
             if i + 1 < n and template[i + 1] == "{":
                 out.append("{")
                 i += 2
                 continue
-            j = template.find("}", i)
-            if j < 0:
-                raise EvalError("missing '}' in format string")
+            # Find the matching `}`. Reject nested `{`.
+            j = i + 1
+            while j < n and template[j] != "}":
+                if template[j] == "{":
+                    raise EvalError("Nested replacement fields are not supported")
+                j += 1
+            if j >= n:
+                raise EvalError("unmatched '{' in format string")
             spec = template[i + 1 : j]
             i = j + 1
-            # Convert specifier (no !s/!r/:fmt for simplicity).
-            # Split spec into name and conversion.
+
+            # Split off optional `!r` / `!s` conversion.
             conv = ""
             if "!" in spec:
-                spec, conv = spec.rsplit("!", 1)
-            # Look up the value.
+                spec, conv = spec.split("!", 1)
+                if conv not in ("r", "s"):
+                    raise EvalError(f"unknown conversion: !{conv}")
+
+            # Validate the field name.
             if spec == "":
+                # Implicit positional `{}`.
+                if seen_explicit_positional:
+                    raise EvalError(
+                        "Cannot mix manual and automatic numbering of positional fields"
+                    )
+                seen_implicit = True
                 if auto_index >= len(args):
-                    raise EvalError("not enough positional arguments for format")
+                    raise EvalError(
+                        f"No replacement found for index {auto_index}"
+                    )
                 value = args[auto_index]
                 auto_index += 1
-            elif spec.isdigit():
+            elif _looks_like_int_field(spec):
+                # Explicit positional `{N}` (possibly `{-N}`).
+                if seen_implicit:
+                    raise EvalError(
+                        "Cannot mix manual and automatic numbering of positional fields"
+                    )
+                seen_explicit_positional = True
                 idx = int(spec)
-                if idx >= len(args):
-                    raise EvalError(f"index {idx} out of range for format args")
+                if idx < 0 or idx >= len(args):
+                    raise EvalError(f"No replacement found for index {idx}")
                 value = args[idx]
             else:
+                # Keyword field. The name must be a valid Starlark identifier
+                # (letters, digits, underscore — no dots, brackets, commas,
+                # parentheses, etc.). Bazel's spec rejects them with
+                # "Invalid character X inside replacement field".
+                _validate_keyword_field(spec)
                 if spec not in kwargs:
-                    raise EvalError(f"missing keyword argument: {spec}")
+                    raise EvalError(f"Missing argument {spec!r}")
                 value = kwargs[spec]
-            from .values import repr_starlark, str_starlark
+
             if conv == "r":
                 out.append(repr_starlark(value))
             else:
                 out.append(str_starlark(value))
         elif c == "}":
+            # `}}` -> literal `}`.
             if i + 1 < n and template[i + 1] == "}":
                 out.append("}")
                 i += 2
                 continue
-            raise EvalError("single '}' in format string")
+            raise EvalError("Found '}' without matching '{'")
         else:
             out.append(c)
             i += 1
     return "".join(out)
+
+
+_FORBIDDEN_FIELD_CHARS = frozenset(",.[]")
+
+
+def _looks_like_int_field(name: str) -> bool:
+    """True if `name` is `[-]digits+` — a positional-index field."""
+    if not name:
+        return False
+    if name[0] == "-":
+        return len(name) > 1 and name[1:].isdigit()
+    return name.isdigit()
+
+
+def _validate_keyword_field(name: str) -> None:
+    """Reject a replacement-field name with reserved format-spec metacharacters.
+
+    Bazel's spec accepts most characters in keyword fields — the only ones
+    rejected are `,`, `.`, `[`, `]`, which are reserved for PEP-3101-style
+    field-spec sub-syntax that Starlark doesn't implement.
+    """
+    for ch in name:
+        if ch in _FORBIDDEN_FIELD_CHARS:
+            raise EvalError(f"Invalid character {ch!r} inside replacement field")
 
 
 # ---------------------------------------------------------------- registration

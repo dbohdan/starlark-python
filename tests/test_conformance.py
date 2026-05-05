@@ -31,25 +31,23 @@ from starlark.eval.test_driver import make_predeclared, pop_reporter, push_repor
 CONFORMANCE_DIR = Path(__file__).parent.parent / "conformance"
 STAR_FILES = sorted(CONFORMANCE_DIR.glob("*.star"))
 
-# Files that exercise features we haven't implemented yet. Trim as we go.
+# Files left as xfail after the spec-compliance push. Each remaining failure
+# is a documented divergence from the Java reference rather than a bug:
+# - json.star, sorted.star: depend on UTF-16 string indexing for surrogate
+#   handling and string ordering.
+# - range.star: depends on Java's signed-32-bit `range()` argument check;
+#   we use arbitrary-precision int.
+# - fields.star: depends on Bazel's `mutablestruct` test helper rejecting
+#   type-changing field reassignment, which is not part of the language.
+# All four are documented under "Compatibility" in docs/README.md.
 XFAIL_FILES: dict[str, str] = {
-    "json.star": "expects Java-reference UTF-16 string indexing & exact error wording",
-    "set.star": "set spec corners",
-    "fields.star": "mutablestruct field type-tracking on reassignment",
-    "string_format.star": "advanced %-formatting",
-    "string_misc.star": "various string edge cases",
-    "float.star": "float repr / nan / inf edge cases",
-    "int.star": "int.bit_length and similar methods",
-    "int_constructor.star": "int(string) edge cases",
-    "function.star": "lambda kwargs / edge cases",
-    "loop.star": "complex loop semantics",
-    "range.star": "range edge cases",
-    "sorted.star": "sorted: nan placement & utf8 setting",
+    "json.star": "Java UTF-16 indexing for surrogate halves",
+    "fields.star": "mutablestruct type-tracking is a Bazel test helper",
+    "range.star": "Java signed-32-bit range() argument check",
+    "sorted.star": "non-BMP string ordering depends on UTF-16",
 }
 
-# Enable strict xfail so xpass becomes a failure, exposing files we can
-# remove from the list above.
-XFAIL_STRICT = False  # set True after the list is curated
+XFAIL_STRICT = True  # ensure removed-and-passing files are flagged
 
 # Files we skip entirely because they exercise behavior that would hang or
 # require very heavy infrastructure (e.g., 2-billion-element range allocation
