@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _repl() -> int:
-    print("Starlark (pure-Python). Press Ctrl+D to exit.")
+    print("Starlark (starlark-python). Press Ctrl+D to exit.")
     while True:
         try:
             line = input(">>> ")
