@@ -84,6 +84,8 @@ If you want to deviate, write a 3-paragraph analysis in HISTORY.md under
 7. **HISTORY.md after every phase boundary or significant push.** New
    entry at the top of the journal. Date, what landed, what's next, any
    Decisions Pending.
+8. **Writing style** for docs, comments, and commits: see
+   [`docs/style.md`](docs/style.md).
 
 ## Conformance tests
 
