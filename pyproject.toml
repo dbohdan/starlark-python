@@ -118,7 +118,7 @@ env_list = [
 
 [tool.tox.env_run_base]
 description = "run tests"
-deps = ["pytest>=8,<9"]
+deps = ["pytest>=9,<10"]
 commands = [
-  ["pytest"],
+  ["pytest", "-q"],
 ]
