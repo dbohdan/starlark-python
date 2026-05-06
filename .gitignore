@@ -1,11 +1,26 @@
-__pycache__/
-*.py[cod]
+# Directories.
+
 *.egg-info/
-.venv/
+
 .pytest_cache/
+.venv/
 .ruff_cache/
+.tox/
 .uv-cache/
+
+__pycache__/
+attic/
 build/
 dist/
-*.pyz
+
+# Files.
+
+*.history*
+*.log*
+*.py[cdoz]
+*.sw*
+
 .coverage
+.python-version
+
+/help
