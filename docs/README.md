@@ -139,12 +139,14 @@ loader=..., **env) -> Any` evaluates an expression Program.
 loader=...) -> Module` executes a file Program. Each call gets a
 fresh `Module` and `Thread`; only the parsed AST is reused.
 
-A `Program` is **not** safe to share across OS threads that call it
-concurrently — the resolver mutates the AST against each call's env,
-so two threads would race on `Identifier.binding`. Compile once per
-thread, or serialize Program calls behind a lock. The top-level
-`eval()` / `exec_file()` entry points are unaffected: each call
-compiles internally and shares no AST state.
+A `Program` is per-thread. Each `.eval()` / `.exec()` entry takes a
+non-blocking re-entrant lock; concurrent cross-thread use raises
+`RuntimeError("Program is in use by another thread; ...")` instead
+of silently racing on `Identifier.binding`. Same-thread re-entry
+(e.g. a host builtin that calls back into the same `Program`) works
+fine. To run in parallel, `compile()` once per thread. The
+top-level `eval()` / `exec_file()` entry points are unaffected:
+each call compiles internally and shares no AST state.
 
 ### `starlark.exec_file(source, filename="<file>", *, predeclared=None, universal=None, loader=None, max_steps=None, on_max_steps=None, max_allocs=None, on_max_allocs=None) -> Module`
 

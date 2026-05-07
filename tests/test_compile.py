@@ -12,6 +12,8 @@ Validates:
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 import starlark
@@ -175,6 +177,111 @@ def test_legacy_exec_file_handles_bare_call():
 
 
 # --------------------------------------------------------------- remarshal
+
+
+# --------------------------------------------------------------- thread guard
+
+
+def test_program_concurrent_cross_thread_raises():
+    """Two threads calling .eval() on the same Program at the same
+    time must raise RuntimeError, not silently race on the resolver's
+    AST mutations."""
+    import threading
+
+    # The "fast" thread blocks inside a host builtin until the "slow"
+    # thread has tried (and failed) to enter — guarantees we observe
+    # the concurrent state regardless of scheduling order.
+    enter_b = threading.Barrier(2)
+    release_a = threading.Event()
+    a_in_callback = threading.Event()
+
+    def slow_callback():
+        a_in_callback.set()
+        enter_b.wait()
+        release_a.wait()
+        return 42
+
+    program = compile("hook()")
+    hook = BuiltinFunction(name="hook", impl=slow_callback)
+
+    errors: list[BaseException] = []
+
+    def thread_a():
+        try:
+            program.eval(hook=hook)
+        except BaseException as e:
+            errors.append(e)
+
+    def thread_b():
+        a_in_callback.wait()
+        enter_b.wait()
+        try:
+            program.eval(hook=hook)
+        except BaseException as e:
+            errors.append(e)
+        finally:
+            release_a.set()
+
+    ta = threading.Thread(target=thread_a)
+    tb = threading.Thread(target=thread_b)
+    ta.start()
+    tb.start()
+    ta.join(timeout=5)
+    tb.join(timeout=5)
+
+    # Exactly one of the two should have hit the guard; the other
+    # completed successfully.
+    runtime_errors = [e for e in errors if isinstance(e, RuntimeError)]
+    assert len(runtime_errors) == 1, errors
+    assert "another thread" in str(runtime_errors[0])
+
+
+def test_program_sequential_cross_thread_works():
+    """A Program can be handed off between threads as long as the
+    calls don't overlap."""
+    import threading
+
+    program = compile("data * 2")
+    results: dict[str, Any] = {}
+
+    def run_in(name, value):
+        results[name] = program.eval(data=value)
+
+    ta = threading.Thread(target=run_in, args=("a", 21))
+    ta.start()
+    ta.join(timeout=5)
+    tb = threading.Thread(target=run_in, args=("b", 100))
+    tb.start()
+    tb.join(timeout=5)
+
+    assert results == {"a": 42, "b": 200}
+
+
+def test_program_same_thread_recursion_works():
+    """The lock is re-entrant: a host builtin that calls back into
+    the same Program from the same thread must not trip the guard."""
+    inner = compile("n * n")
+
+    def callback(n):
+        # Calls inner.eval() while we're already inside an outer eval.
+        return inner.eval(n=n)
+
+    outer = compile("square(7)")
+    outer_result = outer.eval(square=BuiltinFunction(name="square", impl=callback))
+    assert outer_result == 49
+
+    # Inner Program is a separate Program; sanity check direct re-entry
+    # by calling the same Program from inside its own callback.
+    self_ref = compile("touch()")
+    depth = {"n": 0}
+
+    def touch():
+        depth["n"] += 1
+        if depth["n"] < 3:
+            return self_ref.eval(touch=BuiltinFunction(name="touch", impl=touch))
+        return depth["n"]
+
+    assert self_ref.eval(touch=BuiltinFunction(name="touch", impl=touch)) == 3
 
 
 def test_remarshal_pattern():

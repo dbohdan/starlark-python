@@ -177,6 +177,27 @@ matching exit status and stdout. Skip cleanly if absent.
 
 Append-only. Newest entries on top.
 
+### 2026-05-07 — Program: cross-thread guard
+
+Made the documented per-thread limitation enforceable. Each
+`Program.eval()` / `.exec()` entry now takes a non-blocking
+`threading.RLock` acquire; concurrent cross-thread use raises
+`RuntimeError("Program is in use by another thread; ...")` instead
+of silently racing on `Identifier.binding`. Same-thread re-entry —
+a host builtin that calls back into the same `Program` — still
+works because `RLock` is reentrant by the same thread. Sequential
+hand-off across threads also works (the lock is released before
+return).
+
+The cost is one `RLock` per `Program` and one acquire/release per
+call (microseconds). Invisible to correct callers; exact against
+the documented failure mode. The top-level `eval()` / `exec_file()`
+entry points are unaffected — they don't share an AST across calls.
+
+3 tests in `tests/test_compile.py` cover the matrix: cross-thread
+concurrent → raises; cross-thread sequential → works; same-thread
+recursion → works.
+
 ### 2026-05-07 — Host integration API (security and architecture review)
 
 Self-review of the four-phase host integration rollout. Found two

@@ -20,6 +20,7 @@ purposes (it overwrites `Identifier.binding`, `DefStatement.locals`,
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -41,18 +42,28 @@ class Program:
             `.eval()`); False if it's a multi-statement file (use
             `.exec()`).
 
-    Thread safety: a single `Program` is **not** safe to share across
-    OS threads that call `.eval()` / `.exec()` concurrently. The
-    resolver mutates the AST in place against the per-call env, so
-    concurrent calls would race on `Identifier.binding`. Hosts that
-    want parallel evaluation should `compile()` once per thread, or
-    serialize Program calls behind a lock. The top-level
-    `starlark.eval()` / `starlark.exec_file()` entry points remain
-    fully thread-safe — each call compiles internally and does not
-    share AST state.
+    Thread safety: a single `Program` is per-thread. The resolver
+    mutates the AST in place against each call's env, so concurrent
+    `.eval()` / `.exec()` calls from different threads would race on
+    `Identifier.binding`. To make the failure loud instead of silent,
+    each entry takes a non-blocking re-entrant lock; concurrent
+    cross-thread use raises `RuntimeError`. Same-thread re-entry
+    (e.g. a host builtin that calls back into the same Program)
+    works fine. Hosts that want parallel evaluation should
+    `compile()` once per thread. The top-level `starlark.eval()` /
+    `starlark.exec_file()` entry points remain fully thread-safe —
+    each call compiles internally and shares no AST state.
     """
 
-    __slots__ = ("_expr", "_file", "_locs", "filename", "is_expression", "source")
+    __slots__ = (
+        "_expr",
+        "_file",
+        "_lock",
+        "_locs",
+        "filename",
+        "is_expression",
+        "source",
+    )
 
     def __init__(
         self,
@@ -68,6 +79,10 @@ class Program:
         self._locs = locs
         self._expr = expr
         self.is_expression = expr is not None
+        # Re-entrant: same-thread recursion is allowed (a host builtin
+        # may call back into eval); cross-thread concurrent entry fails
+        # the non-blocking acquire and we raise.
+        self._lock = threading.RLock()
 
     # ----------------------------------------------------------- expression
 
@@ -94,31 +109,39 @@ class Program:
                 "Program.eval(): source is a file, use .exec() instead "
                 "(or compile a single expression)"
             )
-        pre = predeclared or {}
-        uni = make_universal()
-        if universal:
-            uni.update(universal)
-        uni.update(env)
-        _resolve(self._file, self._locs, pre, uni)
-        module = Module(self.filename)
-        thread = Thread(
-            module=module,
-            predeclared=pre,
-            universal=uni,
-            locs=self._locs,
-            loader=loader,
-            max_steps=max_steps,
-            on_max_steps=on_max_steps,
-            max_allocs=max_allocs,
-            on_max_allocs=on_max_allocs,
-        )
-        frame = Frame(locals_=module.globals, function_name="<expr>", module=module)
-        thread.frames.append(frame)
+        if not self._lock.acquire(blocking=False):
+            raise RuntimeError(
+                "Program is in use by another thread; compile per thread "
+                "or serialize calls behind a lock"
+            )
         try:
-            with with_mutability(module.mutability), with_thread(thread):
-                return _eval_expr(self._expr, frame, thread)
+            pre = predeclared or {}
+            uni = make_universal()
+            if universal:
+                uni.update(universal)
+            uni.update(env)
+            _resolve(self._file, self._locs, pre, uni)
+            module = Module(self.filename)
+            thread = Thread(
+                module=module,
+                predeclared=pre,
+                universal=uni,
+                locs=self._locs,
+                loader=loader,
+                max_steps=max_steps,
+                on_max_steps=on_max_steps,
+                max_allocs=max_allocs,
+                on_max_allocs=on_max_allocs,
+            )
+            frame = Frame(locals_=module.globals, function_name="<expr>", module=module)
+            thread.frames.append(frame)
+            try:
+                with with_mutability(module.mutability), with_thread(thread):
+                    return _eval_expr(self._expr, frame, thread)
+            finally:
+                thread.frames.pop()
         finally:
-            thread.frames.pop()
+            self._lock.release()
 
     # ----------------------------------------------------------- file
 
@@ -138,27 +161,35 @@ class Program:
             raise ValueError(
                 "Program.exec(): source is a single expression, use .eval() instead"
             )
-        pre = predeclared or {}
-        uni = make_universal()
-        if universal:
-            uni.update(universal)
-        _resolve(self._file, self._locs, pre, uni)
-        module = Module(self.filename)
-        thread = Thread(
-            module=module,
-            predeclared=pre,
-            universal=uni,
-            locs=self._locs,
-            loader=loader,
-            max_steps=max_steps,
-            on_max_steps=on_max_steps,
-            max_allocs=max_allocs,
-            on_max_allocs=on_max_allocs,
-        )
-        with with_mutability(module.mutability), with_thread(thread):
-            eval_file(self._file, thread)
-        module.thread = thread
-        return module
+        if not self._lock.acquire(blocking=False):
+            raise RuntimeError(
+                "Program is in use by another thread; compile per thread "
+                "or serialize calls behind a lock"
+            )
+        try:
+            pre = predeclared or {}
+            uni = make_universal()
+            if universal:
+                uni.update(universal)
+            _resolve(self._file, self._locs, pre, uni)
+            module = Module(self.filename)
+            thread = Thread(
+                module=module,
+                predeclared=pre,
+                universal=uni,
+                locs=self._locs,
+                loader=loader,
+                max_steps=max_steps,
+                on_max_steps=on_max_steps,
+                max_allocs=max_allocs,
+                on_max_allocs=on_max_allocs,
+            )
+            with with_mutability(module.mutability), with_thread(thread):
+                eval_file(self._file, thread)
+            module.thread = thread
+            return module
+        finally:
+            self._lock.release()
 
 
 def _resolve(file: _ast.StarlarkFile, locs, pre: dict, uni: dict) -> None:
