@@ -177,6 +177,55 @@ matching exit status and stdout. Skip cleanly if absent.
 
 Append-only. Newest entries on top.
 
+### 2026-05-07 — Host integration API (security and architecture review)
+
+Self-review of the four-phase host integration rollout. Found two
+real gaps and several procedural-comment cleanups.
+
+**Threat-model gap: depth bounds on `to_value` / `from_value`.** The
+threat model promises `MAX_NESTING_DEPTH = 256` for parser and
+evaluator, but the new host-side conversion helpers had no bound. A
+host that pipes attacker-controlled data (e.g. JSON) through
+`to_value` for evaluation could trip Python's `RecursionError`
+instead of getting a clean abort, leaking Python stack frames in
+the traceback. Same for `from_value`, which additionally has to
+defend against cycles (Starlark lists can contain themselves via
+`x.append(x)`). Both helpers now thread an explicit `depth` counter
+through the recursion and raise `ValueError("...too deeply
+nested...")` at the same 256-level cap the rest of the interpreter
+uses. Four new tests in `test_public_api.py` cover deep nesting and
+self-referential cycles for both directions.
+
+**Concurrency: `Program` is not thread-safe.** A `Program` shared
+across OS threads that call `.eval()` / `.exec()` concurrently
+races on `Identifier.binding` because the resolver mutates the AST
+against each call's env. The top-level `eval()` / `exec_file()`
+entry points are unaffected — each call compiles fresh, no AST
+sharing. This limitation is now documented on the `Program`
+docstring and in `docs/README.md`. A future option would be to
+deep-copy the AST per call (cost: copy time) or serialize all Program
+calls (cost: parallelism). Neither is worth doing speculatively;
+the documented "compile per thread" workaround is the obvious path.
+
+**No introspection-escape regressions.** `namespace()` reuses the
+existing `fields` + `_starlark_type` protocol that
+`json_module._JsonModule` already exercises through
+`tests/test_sandbox_boundary.py`. No new attribute path is added.
+`Namespace` does not subclass any Python container, so the wrapper
+chain `().__class__.__bases__[0].__subclasses__()` remains
+unreachable.
+
+**Procedural-comment cleanup.** Four test-file docstrings carried
+"Phase N: ..." headings. Rewritten to describe what the file
+covers, not when it was added. One in-test note about Phase 2 not
+landing yet was rewritten as a `pytest.raises` assertion.
+
+The four-phase landing direction looks healthy: the public surface
+remains small (one new submodule, three new helpers, one new
+`Program` type), the documented invariants remain enforceable, and
+hosts can do everything remarshal needs without touching
+`starlark.eval.*`.
+
 ### 2026-05-07 — Host integration API (docs)
 
 `docs/README.md` revised to cover the new public surface that landed

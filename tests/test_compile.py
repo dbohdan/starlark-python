@@ -1,4 +1,5 @@
-"""Phase 3: `compile(source)` returns a `Program` runnable many times.
+"""Tests for `compile(source) → Program` and the legacy
+`eval()` / `exec_file()` wrappers built on top of it.
 
 Validates:
 - Auto-detection of expression vs file.
@@ -6,7 +7,7 @@ Validates:
 - Multiple runs against fresh modules.
 - Resource limits applied per-run, not per-compile.
 - Eval/exec mismatch raises a clear error.
-- The existing `eval()` and `exec_file()` wrappers still work.
+- The legacy `eval()` and `exec_file()` wrappers still work.
 """
 
 from __future__ import annotations

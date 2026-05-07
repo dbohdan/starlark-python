@@ -1,10 +1,10 @@
-"""Phase 4: `starlark.namespace(name, fields)` builds the
-`fields`-dict + `_starlark_type` object protocol that the evaluator
-already uses for the `json` builtin and conformance test structs.
+"""Tests for `starlark.namespace(name, fields)`.
 
-This is the supported way for hosts to expose a bundle of related
-helpers (e.g. `remarshal.bytes_to_str`, `remarshal.iso_to_datetime`)
-without hand-rolling the protocol every time.
+`namespace()` builds the `fields`-dict + `_starlark_type` object
+protocol that the evaluator uses for the `json` builtin and the
+conformance test driver's structs. It is the supported way for hosts
+to expose a bundle of related helpers (e.g. `remarshal.bytes_to_str`,
+`remarshal.iso_to_datetime`) without hand-rolling the protocol.
 """
 
 from __future__ import annotations

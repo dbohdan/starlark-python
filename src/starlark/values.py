@@ -24,6 +24,7 @@ from __future__ import annotations
 import datetime as _datetime
 from typing import Any
 
+from .eval.limits import MAX_NESTING_DEPTH
 from .eval.mutability import IMMUTABLE, Mutability
 from .eval.values import (
     BuiltinFunction,
@@ -69,31 +70,36 @@ def to_value(py_value: Any, *, mutability: Mutability | None = None) -> Any:
     tree, pass a `Module.mutability` (or any unfrozen `Mutability`).
 
     Raises `UnsupportedTypeError` for anything that isn't a recognized
-    Python primitive, container, or already a Starlark value.
+    Python primitive, container, or already a Starlark value, and
+    `ValueError` if the input nests deeper than `MAX_NESTING_DEPTH`
+    (256) levels — a clean abort for adversarial host-side data instead
+    of a Python `RecursionError`.
     """
     if mutability is None:
         mutability = Mutability("to_value")
         mutability.freeze()
-    return _to_value(py_value, mutability)
+    return _to_value(py_value, mutability, depth=0)
 
 
-def _to_value(value: Any, mut: Mutability) -> Any:
+def _to_value(value: Any, mut: Mutability, depth: int) -> Any:
+    if depth > MAX_NESTING_DEPTH:
+        raise ValueError(f"to_value: input too deeply nested (>{MAX_NESTING_DEPTH} levels)")
     if value is None:
         return None
     if isinstance(value, _SCALAR_TYPES):
         return value
     if isinstance(value, dict):
         return Dict(
-            {k: _to_value(v, mut) for k, v in value.items()},
+            {k: _to_value(v, mut, depth + 1) for k, v in value.items()},
             mutability=mut,
         )
     if isinstance(value, list):
         return StarlarkList(
-            [_to_value(v, mut) for v in value],
+            [_to_value(v, mut, depth + 1) for v in value],
             mutability=mut,
         )
     if isinstance(value, tuple):
-        return tuple(_to_value(v, mut) for v in value)
+        return tuple(_to_value(v, mut, depth + 1) for v in value)
     # Already a Starlark value? Return it as-is. Hosts that build trees
     # incrementally should be able to nest pre-wrapped values.
     if isinstance(value, (Dict, StarlarkList, StarlarkSet, Range, BuiltinFunction)):
@@ -117,17 +123,29 @@ def from_value(sv: Any) -> Any:
     insertion-defined and not what most callers want when serializing.
     Convert explicitly with `sorted(s)` or `list(s)` in Starlark.
     Functions and arbitrary host objects also raise.
+
+    Raises `ValueError` if the value nests deeper than
+    `MAX_NESTING_DEPTH` (256) levels — covers both deep input and
+    cyclic structures (a Starlark list that contains itself, etc.).
     """
+    return _from_value(sv, depth=0)
+
+
+def _from_value(sv: Any, depth: int) -> Any:
+    if depth > MAX_NESTING_DEPTH:
+        raise ValueError(
+            f"from_value: value too deeply nested or cyclic (>{MAX_NESTING_DEPTH} levels)"
+        )
     if sv is None:
         return None
     if isinstance(sv, _SCALAR_TYPES):
         return sv
     if isinstance(sv, Dict):
-        return {from_value(k): from_value(v) for k, v in sv.items()}
+        return {_from_value(k, depth + 1): _from_value(v, depth + 1) for k, v in sv.items()}
     if isinstance(sv, StarlarkList):
-        return [from_value(v) for v in sv]
+        return [_from_value(v, depth + 1) for v in sv]
     if isinstance(sv, tuple):
-        return [from_value(v) for v in sv]
+        return [_from_value(v, depth + 1) for v in sv]
     if isinstance(sv, Range):
         return list(sv)
     if isinstance(sv, StarlarkSet):

@@ -1,4 +1,4 @@
-"""Phase 2: top-level `parse` / `parse_expression` raise on errors.
+"""Top-level `parse` / `parse_expression` raise on errors.
 
 The lower-level `Parser` class methods continue to collect errors into
 `StarlarkFile.errors` without raising, so error-recovery tooling and

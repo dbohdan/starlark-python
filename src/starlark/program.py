@@ -40,6 +40,16 @@ class Program:
         is_expression: True if `source` is a single expression (use
             `.eval()`); False if it's a multi-statement file (use
             `.exec()`).
+
+    Thread safety: a single `Program` is **not** safe to share across
+    OS threads that call `.eval()` / `.exec()` concurrently. The
+    resolver mutates the AST in place against the per-call env, so
+    concurrent calls would race on `Identifier.binding`. Hosts that
+    want parallel evaluation should `compile()` once per thread, or
+    serialize Program calls behind a lock. The top-level
+    `starlark.eval()` / `starlark.exec_file()` entry points remain
+    fully thread-safe — each call compiles internally and does not
+    share AST state.
     """
 
     __slots__ = ("_expr", "_file", "_locs", "filename", "is_expression", "source")

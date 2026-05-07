@@ -206,14 +206,11 @@ def test_from_value_tuple_inside_dict_becomes_list():
 def test_starlark_syntax_error_aliases_dataclass():
     """StarlarkSyntaxError is the renamed dataclass; instances live on
     StarlarkSyntaxException.errors."""
-    try:
+    with pytest.raises(StarlarkSyntaxException) as exc:
         starlark.parse("def 1: pass")
-    except StarlarkSyntaxException as e:
-        # Each entry is the SyntaxError dataclass — same type as
-        # StarlarkSyntaxError exported from the top level.
-        assert all(isinstance(err, StarlarkSyntaxError) for err in e.errors)
-    # Note: parse() doesn't raise yet — that's Phase 2. If it returns a
-    # file with errors, this still demonstrates the alias.
+    # Each entry is the SyntaxError dataclass — same type as
+    # StarlarkSyntaxError exported from the top level.
+    assert all(isinstance(err, StarlarkSyntaxError) for err in exc.value.errors)
 
 
 def test_make_universal_returns_dict():
@@ -228,3 +225,48 @@ def test_mutability_is_constructible():
     assert not m.frozen
     m.freeze()
     assert m.frozen
+
+
+# --------------------------------------------------------------- depth bounds
+
+
+def test_to_value_rejects_deeply_nested_input():
+    """Adversarial host-side input must abort cleanly, not crash with
+    Python's RecursionError."""
+    deep = []
+    inner = deep
+    for _ in range(1000):
+        new = []
+        inner.append(new)
+        inner = new
+    with pytest.raises(ValueError, match="too deeply nested"):
+        to_value(deep)
+
+
+def test_to_value_rejects_python_dict_cycle():
+    """A Python dict that references itself would otherwise infinite-recurse."""
+    d: dict = {}
+    d["self"] = d
+    with pytest.raises(ValueError, match="too deeply nested"):
+        to_value(d)
+
+
+def test_from_value_rejects_starlark_list_cycle():
+    """A Starlark list that contains itself would otherwise infinite-recurse."""
+    mod = starlark.Module("test")
+    sv = StarlarkList([], mutability=mod.mutability)
+    sv.append(sv)
+    with pytest.raises(ValueError, match="too deeply nested or cyclic"):
+        from_value(sv)
+
+
+def test_from_value_rejects_deep_nesting():
+    mod = starlark.Module("test")
+    inner = StarlarkList([], mutability=mod.mutability)
+    deep = inner
+    for _ in range(1000):
+        new = StarlarkList([], mutability=mod.mutability)
+        new.append(deep)
+        deep = new
+    with pytest.raises(ValueError, match="too deeply nested or cyclic"):
+        from_value(deep)
