@@ -23,9 +23,6 @@ classifiers = [
   "Operating System :: OS Independent",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: Implementation :: CPython",
-  "Programming Language :: Python :: Implementation :: PyPy",
   "Topic :: Software Development :: Interpreters",
   "Typing :: Typed",
 ]
@@ -114,7 +111,6 @@ env_list = [
   "py312",
   "py313",
   "py314",
-  "pypy311",
 ]
 
 [tool.tox.env_run_base]
