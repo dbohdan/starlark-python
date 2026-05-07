@@ -1,5 +1,9 @@
 # Starlark in Python
 
+[![PyPI package version badge.](https://img.shields.io/pypi/v/starlark)](https://pypi.org/project/starlark/)
+![Python 3.11, 3.12, 3.13, 3.14 supported.](https://img.shields.io/badge/python-3.11_%7C_3.12_%7C_3.13_%7C_3.14-blue)
+[![PyPI download statistics badge.](https://img.shields.io/pypi/dm/starlark)](https://pypistats.org/packages/starlark)
+
 This project provides a pure-Python implementation of the [Starlark][starlark] configuration language.
 It was ported by AI from the Java reference implementation that ships with [Bazel][bazel].
 
@@ -58,8 +62,8 @@ The package installs a `starlark-python` console script.
 It can also be run as a zipapp:
 
 ```sh
-poe zipapp                               # builds ./starlark-python.pyz (~560K)
-./starlark-python.pyz -c "1 + 2 * 3"     # 7
+poe zipapp                                 # builds ./starlark-python.pyz (~560K)
+./starlark-python.pyz -c "1 + 2 * 3"       # 7
 ./starlark-python.pyz path/to/script.star
 ```
 
