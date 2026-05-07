@@ -33,8 +33,6 @@ from .values import (
     to_value,
 )
 
-__version__ = "0.0.0"
-
 
 def eval(
     source: str,
@@ -137,7 +135,6 @@ __all__ = [
     "StepLimitExceeded",
     "Thread",
     "UnsupportedTypeError",
-    "__version__",
     "compile",
     "eval",
     "exec_file",
