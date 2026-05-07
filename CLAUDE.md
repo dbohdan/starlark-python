@@ -77,8 +77,13 @@ If you want to deviate, write a 3-paragraph analysis in HISTORY.md under
 2. `uv run pytest -q` for the full suite.
 3. `uv run pytest tests/test_X.py -q` per-phase.
 4. `uv run ruff check --fix src tests` before committing.
-5. **Commit per concept.** History should read like a tutorial. Use semantic
-   messages: "Phase N: <what>." for phase landings.
+5. **One logically distinct change per commit.** History should read
+   like a tutorial. If a single working session adds a feature *and*
+   refactors an unrelated module *and* fixes a typo, that's three
+   commits, not one. A reviewer should be able to revert any one
+   commit cleanly. Use semantic messages: "Phase N: <what>." for
+   phase landings; otherwise an imperative summary of the one
+   concept landed.
 6. **Every commit has a test delta.** Either a new passing test, an xfail
    flipping to xpass, or a new xfail with explanation.
 7. **HISTORY.md after every phase boundary or significant push.** New
