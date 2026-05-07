@@ -84,7 +84,17 @@ If you want to deviate, write a 3-paragraph analysis in HISTORY.md under
 7. **HISTORY.md after every phase boundary or significant push.** New
    entry at the top of the journal. Date, what landed, what's next, any
    Decisions Pending.
-8. **Writing style** for docs, comments, and commits: see
+8. **New features and changed API surface require a review against
+   [`security/threat-model.md`](security/threat-model.md).** Walk the
+   guarantees (no filesystem / network / subprocess, no introspection
+   escape, concurrent use is safe, `MAX_NESTING_DEPTH` and
+   `MAX_CONTAINER_ELEMENTS` apply at every materializing site) and
+   confirm the change preserves them — or document explicitly what
+   changed and why. Helpers that recurse over user-supplied data
+   (parsers, walkers, conversion utilities) need an explicit depth
+   bound and, for mutable values, cycle protection. Catching a gap at
+   review is cheap; catching it after release is not.
+9. **Writing style** for docs, comments, and commits: see
    [`docs/style.md`](docs/style.md).
 
 ## Conformance tests
