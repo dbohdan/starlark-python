@@ -177,6 +177,41 @@ matching exit status and stdout. Skip cleanly if absent.
 
 Append-only. Newest entries on top.
 
+### 2026-05-07 — Host integration API (Phase 3: compile-once Program API)
+
+The big one. Added `starlark.compile(source) → Program`, with
+`Program.eval()` for expressions and `Program.exec()` for files.
+A `Program` parses the source once and can be invoked many times
+against fresh `Module`s — exactly the shape remarshal needs for its
+"one transform, many docs" pipeline.
+
+`compile(source, mode=...)` takes a `mode=` kwarg: `"auto"` (default)
+classifies expression-vs-file by trying expression-parse first;
+`"expression"` forces expression form; `"file"` forces file form.
+The `mode="file"` override matters: a single-line `do_something()`
+parses as a valid expression but the host usually means "run this as
+a one-statement file". `exec_file()` uses `mode="file"` internally
+so the conformance suite's `assert_eq(...)` chunks still work.
+
+Resolution is redone on every `.eval()`/`.exec()` call. The resolver
+mutates the AST in place (overwrites `Identifier.binding`,
+`DefStatement.locals`, `StarlarkFile.globals`) but never accumulates
+state, so re-resolving with a different env is safe. Performance is
+not a goal — re-resolve is cheap relative to evaluation, and the
+caching design space is not worth opening.
+
+The previous `eval()` implementation built a synthesised
+`StarlarkFile` wrapping the parsed `Expression`, called the resolver
+on it, then bypassed `eval_file` and called the private `_eval_expr`.
+That dance is now gone — `Program` does the same thing once, cleanly,
+and the top-level `eval()`/`exec_file()` are five-line wrappers over
+`compile(...).eval()` / `compile(..., mode="file").exec()`.
+
+18 tests in `tests/test_compile.py` cover auto-detection, mode
+overrides, repeat-execution with fresh state, mismatched call shape,
+per-run resource limits, and a full simulated remarshal-pattern
+round-trip using only the public API (no `starlark.eval.*` imports).
+
 ### 2026-05-07 — Host integration API (Phase 2: parse error consistency)
 
 The top-level `parse(source)` and `parse_expression(source)` functions

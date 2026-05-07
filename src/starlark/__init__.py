@@ -12,8 +12,9 @@ from .eval.errors import (
     ResourceLimitExceeded,
     StepLimitExceeded,
 )
-from .eval.evaluator import Thread, eval_file
+from .eval.evaluator import Thread
 from .eval.module import Module
+from .program import Program, compile
 from .syntax import Lexer, parse, parse_expression, resolve
 from .syntax.errors import StarlarkSyntaxException
 from .syntax.errors import SyntaxError as StarlarkSyntaxError
@@ -58,42 +59,16 @@ def eval(
       Raises `AllocLimitExceeded` when exceeded.
     - `on_max_allocs`: optional callback invoked once when the alloc cap
       is reached, before `AllocLimitExceeded` is raised.
+
+    Equivalent to `compile(source, mode="expression").eval(**env, ...)`.
     """
-    expr = parse_expression(source, file=filename)
-    universal = make_universal()
-    universal.update(env)
-    module = Module(filename)
-    locs = Lexer(source, file=filename).locs
-    thread = Thread(
-        module=module,
-        universal=universal,
-        locs=locs,
+    return compile(source, filename=filename, mode="expression").eval(
         max_steps=max_steps,
         on_max_steps=on_max_steps,
         max_allocs=max_allocs,
         on_max_allocs=on_max_allocs,
+        **env,
     )
-    # Wrap as an expression statement to evaluate via eval_file.
-    from .syntax import ast as _ast
-
-    file = _ast.StarlarkFile(
-        file=filename,
-        statements=[_ast.ExpressionStatement(start=expr.start, end=expr.end, expression=expr)],
-        errors=[],
-    )
-    resolve(file, locs, universal=frozenset(universal))
-    if file.errors:
-        raise StarlarkSyntaxException(file.errors)
-    from .eval.builtins import with_mutability, with_thread
-    from .eval.evaluator import Frame, _eval_expr
-
-    frame = Frame(locals_=module.globals, function_name="<expr>", module=module)
-    thread.frames.append(frame)
-    try:
-        with with_mutability(module.mutability), with_thread(thread):
-            return _eval_expr(expr, frame, thread)
-    finally:
-        thread.frames.pop()
 
 
 def exec_file(
@@ -126,41 +101,18 @@ def exec_file(
       that go out of scope are not refunded.
     - `on_max_allocs`: optional callback invoked once when the alloc cap
       is reached, before `AllocLimitExceeded` is raised.
+
+    Equivalent to `compile(source, mode="file").exec(...)`.
     """
-    file = parse(source, file=filename)
-    locs = Lexer(source, file=filename).locs
-    pre = predeclared or {}
-    uni = make_universal()
-    if universal:
-        uni.update(universal)
-    resolve(
-        file,
-        locs,
-        predeclared=frozenset(pre),
-        universal=frozenset(uni),
-    )
-    if file.errors:
-        raise StarlarkSyntaxException(file.errors)
-    module = Module(filename)
-    thread = Thread(
-        module=module,
-        predeclared=pre,
-        universal=uni,
-        locs=locs,
+    return compile(source, filename=filename, mode="file").exec(
+        predeclared=predeclared,
+        universal=universal,
         loader=loader,
         max_steps=max_steps,
         on_max_steps=on_max_steps,
         max_allocs=max_allocs,
         on_max_allocs=on_max_allocs,
     )
-    from .eval.builtins import with_mutability, with_thread
-
-    with with_mutability(module.mutability), with_thread(thread):
-        eval_file(file, thread)
-    # Expose the Thread so hosts can read `module.thread.steps` /
-    # `.allocs` for cost reporting.
-    module.thread = thread
-    return module
 
 
 __all__ = [
@@ -169,8 +121,10 @@ __all__ = [
     "BuiltinFunction",
     "Dict",
     "EvalError",
+    "Lexer",
     "Module",
     "Mutability",
+    "Program",
     "Range",
     "ResourceLimitExceeded",
     "StarlarkList",
@@ -181,9 +135,13 @@ __all__ = [
     "Thread",
     "UnsupportedTypeError",
     "__version__",
+    "compile",
     "eval",
     "exec_file",
     "from_value",
     "make_universal",
+    "parse",
+    "parse_expression",
+    "resolve",
     "to_value",
 ]
