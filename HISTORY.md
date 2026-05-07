@@ -177,6 +177,19 @@ matching exit status and stdout. Skip cleanly if absent.
 
 Append-only. Newest entries on top.
 
+### 2026-05-07 — Host integration API (docs)
+
+`docs/README.md` revised to cover the new public surface that landed
+in phases 1–4: `compile()` / `Program`, `to_value` / `from_value`,
+`namespace()`, `StarlarkSyntaxError` (renamed dataclass alias), and
+the `starlark.values` submodule. Added a "Host integration" section
+with the compile-once / many-runs pattern that motivated the work.
+The codebase structure listing was updated to mention the two new
+top-level modules (`values.py`, `program.py`).
+
+The top-level `README.md` is user-facing (badges, quickstart) and
+unchanged; the new material belongs in the developer docs.
+
 ### 2026-05-07 — Host integration API (Phase 4: namespace helper)
 
 Added `starlark.namespace(name, fields)`, which builds the

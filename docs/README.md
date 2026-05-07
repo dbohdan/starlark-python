@@ -41,7 +41,11 @@ exact behavioral and string-output equivalence.
 ## Codebase structure
 
     src/starlark/
-      __init__.py             Public API: eval, exec_file, EvalError, Module, Thread.
+      __init__.py             Public API: eval, exec_file, compile, EvalError,
+                              Module, Thread, plus re-exports of values/syntax names.
+      values.py               Public host integration surface: Dict, StarlarkList,
+                              Mutability, to_value, from_value, namespace, etc.
+      program.py              compile() and Program (parse-once / run-many).
       cmd.py                  Argparse CLI ('starlark-python' console script & 'python -m starlark').
       __main__.py             Trampoline so 'python -m starlark' works.
       syntax/                 Source -> AST. Mirrors net.starlark.java.syntax.
@@ -110,6 +114,31 @@ starlark.eval("len('hello')")            # 5
 starlark.eval("json.encode([1, 2])")     # '[1,2]'
 ```
 
+Equivalent to `starlark.compile(source, mode="expression").eval(**env)`.
+
+### `starlark.compile(source, filename="<input>", *, mode="auto") -> Program`
+
+Parse `source` once into a reusable `Program`. The same Program can be
+invoked many times with different host environments — useful for
+data-transformation pipelines that apply one script to many inputs.
+
+`mode` is `"auto"` (default; tries expression first, falls back to
+file), `"expression"`, or `"file"`. The `mode="file"` override exists
+because a single-line `do_something()` parses as a valid expression
+*and* as a one-statement file; the host has to say which it meant.
+
+```python
+program = starlark.compile("[x * 2 for x in data]")
+program.eval(data=[1, 2, 3])             # [2, 4, 6]
+program.eval(data=[10])                  # [20]
+```
+
+`Program.eval(*, predeclared=None, universal=None, max_steps=...,
+loader=..., **env) -> Any` evaluates an expression Program.
+`Program.exec(*, predeclared=None, universal=None, max_steps=...,
+loader=...) -> Module` executes a file Program. Each call gets a
+fresh `Module` and `Thread`; only the parsed AST is reused.
+
 ### `starlark.exec_file(source, filename="<file>", *, predeclared=None, universal=None, loader=None, max_steps=None, on_max_steps=None, max_allocs=None, on_max_allocs=None) -> Module`
 
 Parse, resolve, and execute `source` as a Starlark file. Returns the
@@ -117,6 +146,8 @@ populated `Module`. `predeclared` adds host-supplied names visible to
 this file only; `universal` adds names to the read-only universe;
 `loader` resolves `load()` statements. The `max_*` / `on_max_*` kwargs
 configure the opt-in resource limits — see "Resource limits" below.
+
+Equivalent to `starlark.compile(source, mode="file").exec(...)`.
 
 ```python
 m = starlark.exec_file('''
@@ -158,6 +189,110 @@ frozen mutation, undefined name, etc.). Carries `message: str` and
 `except EvalError` handlers catch them; hosts that want to distinguish
 "DoS-style abort" from a normal Starlark error catch
 `ResourceLimitExceeded`. See "Resource limits" below.
+
+### `starlark.StarlarkSyntaxException` / `starlark.StarlarkSyntaxError`
+
+Raised by `parse`, `parse_expression`, `compile`, `eval`, `exec_file`,
+and `Program.eval`/`exec` whenever the source has lex, parse, or
+resolve errors. The exception carries a `.errors: list[StarlarkSyntaxError]`
+attribute; each entry is a frozen dataclass with `position` and
+`message` fields. The dataclass is exported as `StarlarkSyntaxError`
+to avoid shadowing Python's builtin `SyntaxError` on
+`from starlark import *`; the original name is still available as
+`starlark.syntax.SyntaxError`.
+
+For error-recovery tooling that wants to keep going past the first
+error, call the lower-level `Parser` class directly:
+`Parser(Lexer(source)).parse_file()` returns a `StarlarkFile` with
+`.errors` populated and never raises.
+
+## Host integration
+
+The `starlark.values` submodule exposes the runtime types and the
+helpers hosts use to move data into and out of Starlark.
+
+### Value types
+
+```python
+from starlark.values import (
+    Dict, StarlarkList, StarlarkSet, Range,
+    BuiltinFunction, Mutability, IMMUTABLE,
+    Namespace,
+)
+```
+
+`Dict`, `StarlarkList`, and `StarlarkSet` are mutable containers that
+share a `Mutability` token. `Range` is the immutable lazy integer
+sequence built by `range()`. `BuiltinFunction` wraps a Python callable
+exposed to Starlark code. `Namespace` is the value type returned by
+`namespace()` (see below).
+
+Python primitives (`None`, `bool`, `int`, `float`, `str`, `bytes`,
+`tuple`, `datetime` types) cross the Starlark boundary as themselves —
+no wrapping needed. Note: `bytes` is *not* a Starlark type. Python
+`bytes` values pass through the evaluator as opaque objects, usable
+only by host-provided builtins.
+
+### `starlark.to_value(py_value, *, mutability=None)`
+
+Recursively wrap a Python value for use in Starlark. Containers
+(`dict`, `list`) become `Dict` / `StarlarkList`; tuples stay as
+tuples. If `mutability` is `None`, a fresh frozen `Mutability` is
+created — the resulting tree is read-only. Pass `module.mutability`
+explicitly if Starlark code needs to mutate the input.
+
+```python
+sv = starlark.to_value({"x": [1, 2, 3]})              # frozen tree
+mod = starlark.Module("host")
+mut = starlark.to_value([1, 2], mutability=mod.mutability)  # mutable until mod.freeze()
+```
+
+### `starlark.from_value(sv) -> Any`
+
+Recursively unwrap a Starlark value to plain Python data. `Dict →
+dict`, `StarlarkList → list`, `Range → list`, `tuple → list`. Sets
+raise `UnsupportedTypeError` (their order is insertion-defined; convert
+with `sorted(s)` or `list(s)` in Starlark first). Functions and
+arbitrary host objects also raise.
+
+### `starlark.namespace(name, fields)`
+
+Build a struct-like value exposing `fields` as attributes. Python
+callables in `fields` are auto-wrapped as `BuiltinFunction(name=
+f"{name}.{key}", impl=fn)`; non-callable values are stored verbatim.
+The returned object follows the same `fields`-dict + `_starlark_type`
+protocol that the built-in `json` namespace uses, so `json.encode(ns)`
+serializes a namespace as a sorted-key object.
+
+```python
+helpers = starlark.namespace("remarshal", {
+    "bytes_to_str": lambda b, encoding="utf-8": b.decode(encoding),
+    "version": "1.0",
+})
+starlark.eval("remarshal.bytes_to_str(data)", remarshal=helpers, data=b"hi")
+# 'hi'
+```
+
+### Compile-once pattern
+
+For hosts that apply the same Starlark transform to many inputs:
+
+```python
+program = starlark.compile("[x * 2 for x in data]")
+
+def transform(doc):
+    mut = starlark.Mutability("transform")
+    try:
+        return starlark.from_value(
+            program.eval(data=starlark.to_value(doc, mutability=mut))
+        )
+    finally:
+        mut.freeze()
+```
+
+`compile()` parses (and validates) once. Each `program.eval(...)` call
+re-resolves the AST against the supplied env and runs against a fresh
+`Module` — `Module.globals` doesn't leak between runs.
 
 ## Resource limits
 
