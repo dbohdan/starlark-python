@@ -141,11 +141,65 @@ def from_value(sv: Any) -> Any:
     )
 
 
+# --------------------------------------------------------------- namespace
+
+
+class Namespace:
+    """A named bundle of attribute-accessed values exposed to Starlark.
+
+    Implements the protocol the evaluator already uses for the `json`
+    module and conformance test `struct`s: a `fields` dict mapping
+    attribute names to values, plus `_starlark_type` for the type name
+    that appears in error messages and `type(x)` calls.
+
+    Construct via `starlark.namespace(name, fields)` rather than
+    instantiating directly.
+    """
+
+    __slots__ = ("_starlark_type", "fields")
+
+    def __init__(self, name: str, fields: dict[str, Any]) -> None:
+        self._starlark_type = name
+        self.fields = fields
+
+    def __repr__(self) -> str:
+        return f"<namespace {self._starlark_type}>"
+
+
+def namespace(name: str, fields: dict[str, Any]) -> Namespace:
+    """Build a namespace value: a struct-like object exposing `fields`
+    as attributes accessible from Starlark.
+
+    Python callables in `fields` are auto-wrapped as `BuiltinFunction`s
+    with qualified names of the form `"{name}.{key}"`. Already-wrapped
+    `BuiltinFunction`s pass through unchanged. Non-callable values are
+    stored verbatim, so `namespace("config", {"version": "1.0"})` works
+    and exposes `config.version` to Starlark code.
+
+    Example:
+        ns = namespace("remarshal", {
+            "bytes_to_str": lambda b, encoding="utf-8": b.decode(encoding),
+            "version": "0.5.0",
+        })
+        starlark.eval("remarshal.bytes_to_str(data)", remarshal=ns, data=b"hi")
+    """
+    wrapped: dict[str, Any] = {}
+    for key, value in fields.items():
+        if isinstance(value, BuiltinFunction):
+            wrapped[key] = value
+        elif callable(value):
+            wrapped[key] = BuiltinFunction(name=f"{name}.{key}", impl=value)
+        else:
+            wrapped[key] = value
+    return Namespace(name, wrapped)
+
+
 __all__ = [
     "IMMUTABLE",
     "BuiltinFunction",
     "Dict",
     "Mutability",
+    "Namespace",
     "Range",
     "StarlarkList",
     "StarlarkSet",
@@ -154,6 +208,7 @@ __all__ = [
     "equal",
     "from_value",
     "less_than",
+    "namespace",
     "repr_starlark",
     "starlark_type",
     "str_starlark",

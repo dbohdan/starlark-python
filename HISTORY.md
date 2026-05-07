@@ -177,6 +177,34 @@ matching exit status and stdout. Skip cleanly if absent.
 
 Append-only. Newest entries on top.
 
+### 2026-05-07 — Host integration API (Phase 4: namespace helper)
+
+Added `starlark.namespace(name, fields)`, which builds the
+`fields` dict + `_starlark_type` object protocol that the evaluator
+already consumes for `json.*` and the conformance test driver's
+`Struct`. Hosts no longer have to hand-roll the protocol the way
+remarshal did with its private `_Module` class.
+
+Two ergonomics: Python callables in `fields` are auto-wrapped as
+`BuiltinFunction(name=f"{namespace}.{key}", impl=fn)` so attribute
+access and error messages have qualified names; non-callable values
+(strings, ints, anything) are stored verbatim, so a configuration
+namespace like `namespace("config", {"version": "1.0"})` just works.
+Pre-wrapped `BuiltinFunction` values pass through unchanged.
+
+The internal `json_module._JsonModule` and `test_driver.Struct`
+classes are NOT refactored to use `namespace()` in this phase. Both
+have additional behavior (frozen / mutable variants, equality
+semantics) beyond what `namespace()` covers, and the goal here is the
+public API, not internal cleanup.
+
+14 tests in `tests/test_namespace.py` cover construction, callable
+auto-wrapping, attribute access from Starlark, json round-trip
+(`json.encode(ns)` works because the encoder honors `fields`), and a
+full end-to-end simulation of remarshal's helper-module pattern.
+
+This completes the four-phase host integration rollout. Next: README.
+
 ### 2026-05-07 — Host integration API (Phase 3: compile-once Program API)
 
 The big one. Added `starlark.compile(source) → Program`, with
