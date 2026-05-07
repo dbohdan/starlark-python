@@ -177,6 +177,51 @@ matching exit status and stdout. Skip cleanly if absent.
 
 Append-only. Newest entries on top.
 
+### 2026-05-07 — Host integration API (Phase 1: re-exports + conversion helpers)
+
+A downstream user of this library
+([remarshal](https://github.com/dbohdan/remarshal/blob/dev/src/remarshal/starlark_transform.py))
+had to reach into `starlark.eval.values`, `starlark.eval.module`, and
+`starlark.syntax.errors` and read `value._data` to wire Starlark into
+their data-transformation pipeline. The settled architectural decisions
+(integers are Python `int`, strings are Python `str`, mutability is a
+per-Module token) are exactly right for this use case — the awkwardness
+was just a missing public surface. Four-phase rollout begins; this is
+phase one.
+
+**What landed.** New `starlark.values` submodule (mirrors the
+`net.starlark.java.eval` layout) with public re-exports of `Dict`,
+`StarlarkList`, `StarlarkSet`, `Range`, `BuiltinFunction`, `Mutability`,
+`IMMUTABLE`, plus `to_value` / `from_value` / `UnsupportedTypeError`.
+Top-level `starlark` re-exports the headline names so
+`from starlark import to_value, Dict, Mutability` works. `SyntaxError`
+(the `syntax.errors` dataclass) is re-exported as `StarlarkSyntaxError`
+to avoid shadowing the Python builtin on `from starlark import *`;
+`StarlarkSyntaxException` (the raisable form) is now exported too.
+
+**Conversion semantics.** `to_value` recursively wraps `dict`/`list` as
+`Dict`/`StarlarkList` and leaves `tuple` as `tuple` (Starlark's tuple is
+the Python tuple). Scalars (`None`, `bool`, `int`, `float`, `str`,
+`bytes`, `datetime` types) pass through. Default `mutability=` is a
+fresh `Mutability("to_value")` that's frozen after construction — the
+common case is "I just want to pass data in", and a frozen tree is the
+safe default. Callers wanting Starlark code to mutate the input pass
+`module.mutability` explicitly. `from_value` is intentionally
+container-lossy: `Dict→dict`, `StarlarkList→list`, `Range→list`,
+`tuple→list`. Sets raise `UnsupportedTypeError` with a hint to call
+`sorted(s)` or `list(s)` in Starlark first.
+
+**What's next.** Phase 2 makes `parse` and `parse_expression` raise
+`StarlarkSyntaxException` consistently (they currently differ — `parse`
+returns errors via `file.errors`, `parse_expression` raises `ValueError`
+on lex errors). Phase 3 adds `compile(source) → Program` with
+`.eval()`/`.exec()` so hosts can parse-and-resolve once and run the
+program many times against fresh modules. Phase 4 adds a
+`namespace(name, fields)` helper for the
+"`fields` dict + `_starlark_type`" object protocol that
+`json_module._JsonModule` and `test_driver.Struct` already implement.
+README gets a Host Integration section once all four land.
+
 ### 2026-05-05 — Thread safety, step counter, charge-only heap counter
 
 Acted on the threat-model gap the security reviewers flagged. Four

@@ -16,6 +16,19 @@ from .eval.evaluator import Thread, eval_file
 from .eval.module import Module
 from .syntax import Lexer, parse, parse_expression, resolve
 from .syntax.errors import StarlarkSyntaxException
+from .syntax.errors import SyntaxError as StarlarkSyntaxError
+from .values import (
+    IMMUTABLE,
+    BuiltinFunction,
+    Dict,
+    Mutability,
+    Range,
+    StarlarkList,
+    StarlarkSet,
+    UnsupportedTypeError,
+    from_value,
+    to_value,
+)
 
 __version__ = "0.0.0"
 
@@ -151,13 +164,26 @@ def exec_file(
 
 
 __all__ = [
+    "IMMUTABLE",
     "AllocLimitExceeded",
+    "BuiltinFunction",
+    "Dict",
     "EvalError",
     "Module",
+    "Mutability",
+    "Range",
     "ResourceLimitExceeded",
+    "StarlarkList",
+    "StarlarkSet",
+    "StarlarkSyntaxError",
+    "StarlarkSyntaxException",
     "StepLimitExceeded",
     "Thread",
+    "UnsupportedTypeError",
     "__version__",
     "eval",
     "exec_file",
+    "from_value",
+    "make_universal",
+    "to_value",
 ]
