@@ -880,18 +880,36 @@ class Parser:
 
 
 def parse(source: str, file: str = "<input>") -> StarlarkFile:
-    """Parse `source` as a Starlark file. Errors are returned in the StarlarkFile."""
+    """Parse `source` as a Starlark file.
+
+    Raises `StarlarkSyntaxException` if the source has lex or parse errors.
+    On success returns a `StarlarkFile` with `errors == []`.
+
+    Use `Parser(lexer).parse_file()` directly for the lower-level
+    "errors in file.errors, never raises" form (e.g. error-recovery
+    tooling, IDE integrations).
+    """
     lexer = Lexer(source, file=file)
-    return Parser(lexer).parse_file(file=file)
+    f = Parser(lexer).parse_file(file=file)
+    if f.errors:
+        raise StarlarkSyntaxException(f.errors)
+    return f
 
 
 def parse_expression(source: str, file: str = "<input>") -> Expression:
-    """Parse `source` as a single Starlark expression. Raises if there are errors."""
+    """Parse `source` as a single Starlark expression.
+
+    Raises `StarlarkSyntaxException` on lex or parse errors. The lexer
+    error list is shared with the parser's, so this call surfaces both.
+
+    Use `Parser(lexer).parse_expression()` directly for the lower-level
+    form that does not raise.
+    """
     lexer = Lexer(source, file=file)
     p = Parser(lexer)
     e = p.parse_expression()
     if lexer.errors:
-        raise ValueError("; ".join(str(err) for err in lexer.errors))
+        raise StarlarkSyntaxException(list(lexer.errors))
     return e
 
 

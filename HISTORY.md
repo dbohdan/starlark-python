@@ -177,6 +177,31 @@ matching exit status and stdout. Skip cleanly if absent.
 
 Append-only. Newest entries on top.
 
+### 2026-05-07 — Host integration API (Phase 2: parse error consistency)
+
+The top-level `parse(source)` and `parse_expression(source)` functions
+now raise `StarlarkSyntaxException` on lex or parse errors. Previously
+`parse` returned a `StarlarkFile` with errors collected in `.errors`
+and `parse_expression` raised a plain `ValueError` on lex errors —
+three different shapes for the same kind of failure, which forced
+remarshal to catch all three.
+
+The lower-level `Parser` class methods (`Parser(lexer).parse_file()`,
+`Parser(lexer).parse_expression()`) keep the error-list shape — they
+remain the building block for error-recovery tooling and IDE
+integrations. The top-level functions are thin "raise on error"
+wrappers around them.
+
+This is a behavior change for callers that constructed a parse, then
+inspected `.errors` to decide what to do. The two in-repo affected
+test files (`test_parser.py`, conformance `parse_to_completion`)
+either switched to `Parser(...).parse_file()` for error inspection or
+relied on the new raising behavior implicitly. The project is at 0.x
+and there is no out-of-tree consumer that depends on the old shape.
+
+10 new tests in `tests/test_parse_errors.py` cover the raising
+behavior and the lower-level escape hatch.
+
 ### 2026-05-07 — Host integration API (Phase 1: re-exports + conversion helpers)
 
 A downstream user of this library

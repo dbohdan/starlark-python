@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
-from starlark.syntax import ast, parse, parse_expression
+import pytest
+
+from starlark.syntax import Lexer, Parser, ast, parse, parse_expression
+from starlark.syntax.errors import StarlarkSyntaxException
 from starlark.syntax.tokens import TokenKind
 
 
 def parse_or_raise(source: str):
-    f = parse(source)
-    assert not f.errors, [str(e) for e in f.errors]
-    return f.statements
+    """`parse()` already raises on errors; this is just a doc'd alias."""
+    return parse(source).statements
+
+
+def parse_with_errors(source: str):
+    """Lower-level `Parser` form: returns a StarlarkFile with `.errors`
+    populated, useful for tests that want to inspect specific error
+    messages without going through pytest.raises."""
+    return Parser(Lexer(source)).parse_file()
 
 
 def test_empty_file():
@@ -43,7 +52,9 @@ def test_arithmetic_precedence():
 
 
 def test_comparison_not_associative():
-    f = parse("x = 1 < 2 < 3\n")
+    with pytest.raises(StarlarkSyntaxException, match="not associative"):
+        parse("x = 1 < 2 < 3\n")
+    f = parse_with_errors("x = 1 < 2 < 3\n")
     assert any("not associative" in e.message for e in f.errors)
 
 
@@ -134,8 +145,10 @@ def test_string_concat_folded():
 
 
 def test_implicit_concat_forbidden():
-    f = parse('x = "a" "b"\n')
+    f = parse_with_errors('x = "a" "b"\n')
     assert any("implicit string concatenation" in e.message for e in f.errors)
+    with pytest.raises(StarlarkSyntaxException, match="implicit string concatenation"):
+        parse('x = "a" "b"\n')
 
 
 def test_def_statement():
@@ -226,12 +239,12 @@ def test_break_continue_pass():
 
 
 def test_forbidden_keyword_while():
-    f = parse("while True:\n    pass\n")
+    f = parse_with_errors("while True:\n    pass\n")
     assert any("'while' not supported" in e.message for e in f.errors)
 
 
 def test_forbidden_keyword_import():
-    f = parse("import x\n")
+    f = parse_with_errors("import x\n")
     assert any("'import' not supported" in e.message for e in f.errors)
 
 
