@@ -84,7 +84,7 @@ starlark.exec_file(open("main.star").read(), loader=loader)
 
 ## Security
 
-Starlark for Python is new and has **not** been extensively reviewed and tested.
+Starlark in Python is new and has **not** been extensively reviewed and tested.
 
 Starlark is a sandboxed language.
 A `.star` program cannot read or write files, open sockets, spawn processes, or reach any Python object the host did not explicitly hand it.
