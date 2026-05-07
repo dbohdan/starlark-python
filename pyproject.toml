@@ -38,6 +38,9 @@ dev = [
 [project.scripts]
 starlark-python = "starlark.cmd:main"
 
+[project.urls]
+repository = "https://github.com/dbohdan/starlark-python"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
