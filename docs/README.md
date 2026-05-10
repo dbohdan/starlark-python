@@ -1,11 +1,10 @@
 # starlark-python — developer docs
 
-Brief tour of the codebase and the public API. The top-level
-[`README.md`](../README.md) is for users; this is for people working on the
-interpreter itself.
+Brief tour of the codebase and the public API.
+It is intended for users and those working on the interpreter itself.
 
-The Starlark language spec lives next to this file as
-[`spec.md`](spec.md).
+This document is maintained by AI following the [writing style guide](style.md).
+You will find a copy of the official [Starlark language spec](spec.md) in the same directory.
 
 ## Compatibility with the reference implementations
 
