@@ -1,12 +1,16 @@
 # AGENTS.md
 
-Orientation for future Claude sessions resuming this port. Read HISTORY.md
-*after* this for the original 14-phase plan and the running journal.
+Orientation for future Claude sessions and other agents
+resuming work on this codebase.
+Read HISTORY.md *after* this for the original 14-phase plan and
+the running journal.
 
 ## What this repo is
 
 A pure-Python tree-walking interpreter for the Starlark configuration
-language. It is a port of Bazel's Java reference implementation.
+language. It was originally ported from Bazel's Java reference
+implementation; the initial port is complete and the codebase is now in
+maintenance and incremental-feature mode.
 
 The Java source from bazelbuild/bazel was kept under `reference/` during
 the initial port; that directory has since been removed. If you need to
@@ -36,59 +40,87 @@ If you want to deviate, write a 3-paragraph analysis in HISTORY.md under
 7. **`assert_eq` etc. are predeclared, not loaded.** The conformance `.star`
    files in this repo follow Bazel's `ScriptTest` convention — they call
    `assert_eq`/`assert_`/`assert_fails`/`freeze`/`struct`/`mutablestruct`/
-   `int_mul_slow` as predeclared builtins. Phase 7 provides them. Phase 12
-   (`assert.star` module load form) is a placeholder.
+   `int_mul_slow` as predeclared builtins.
 
 ## Goals (settled)
 
 - Zero non-stdlib runtime dependencies.
 - CPython 3.11+.
 - Runs as a zipapp.
-- Passes `conformance/*.star`.
+- Passes the conformance suite from Bazel (copied verbatim in
+  [`conformance/`](conformance/)); currently all but a handful of documented
+  expected failures.
 - **Performance is NOT a goal.** Choose simplicity over cleverness.
 
 ## Layout
 
     conformance/           38 .star test files copied verbatim from Bazel.
     src/starlark/
-      __init__.py          Public API (eval(), parse(), etc.)
-      syntax/              Mirrors net.starlark.java.syntax
-        tokens.py          TokenKind + Token
-        location.py        FileLocations + Position
-        errors.py          SyntaxError
-        lexer.py           Lexer (DONE)
-        ast.py             AST node dataclasses (DONE)
-        parser.py          Parser (DONE)
-        resolver.py        Resolver (in progress)
-      eval/                Mirrors net.starlark.java.eval (not started)
-    tests/
-      test_lexer.py        27 unit tests
-      test_parser.py       32 unit tests
-      test_lexer_conformance.py    38 .star files lex
-      test_parser_conformance.py   38 .star files parse (chunk-split on '---')
-      test_smoke.py        import check + xfail eval('1+1')
-    HISTORY.md             Original 14-phase plan + append-only journal
-    pyproject.toml         hatchling, no runtime deps, pytest+ruff dev
-    uv.lock                Pinned dev deps
+      __init__.py          Public API (eval(), exec_file(), compile(), etc.)
+      values.py            Host integration surface: to_value, from_value, namespace.
+      program.py           compile() and Program (parse-once / run-many).
+      cmd.py               CLI entry point.
+      __main__.py          Trampoline for `python -m starlark`.
+      syntax/              Mirrors net.starlark.java.syntax.
+        tokens.py          TokenKind + Token.
+        location.py        FileLocations + Position.
+        errors.py          SyntaxError + StarlarkSyntaxException.
+        lexer.py           Lexer.
+        ast.py             AST node dataclasses.
+        parser.py          Recursive-descent parser.
+        resolver.py        Static name resolution.
+      eval/                Mirrors net.starlark.java.eval.
+        errors.py          EvalError + CallFrame + limit exceptions.
+        mutability.py      The per-Module Mutability token.
+        module.py          Module: globals dict + Mutability.
+        values.py          Native types + wrappers (StarlarkList, Dict, StarlarkSet,
+                           Range, BuiltinFunction). Helpers: starlark_type, truth,
+                           equal, less_than, repr_starlark, etc.
+        function.py          StarlarkFunction + bind_arguments.
+        evaluator.py         Tree-walking interpreter. Frame, Thread, eval_file, call.
+        methods.py           Per-type method-table dispatch.
+        string_methods.py    All string methods.
+        collection_methods.py All list / dict / set methods.
+        builtins.py          Universal builtins (len, range, sorted, sum, ...).
+        json_module.py       json.encode / decode / encode_indent / indent.
+        test_driver.py       Bazel ScriptTest-style predeclared helpers.
+        loader.py            Loader protocol + FileLoader.
+        limits.py            Allocation-size guards and cost constants.
+    tests/                 Pytest suite (~400 tests).
+      test_lexer.py
+      test_parser.py
+      test_resolver.py
+      test_eval.py
+      test_values.py
+      test_builtins.py
+      test_methods.py
+      test_load.py
+      test_json.py
+      test_lexer_conformance.py
+      test_parser_conformance.py
+      test_resolver_conformance.py
+      test_conformance.py  Parameterized over conformance/*.star.
+      test_cross_validation.py Optional cross-check against starlark-go.
+    HISTORY.md             Original 14-phase plan + append-only journal.
+    pyproject.toml         hatchling, no runtime deps, pytest+ruff dev.
+    uv.lock                Pinned dev deps.
 
 ## How to develop
 
 1. `uv sync` once.
 2. `uv run pytest -q` for the full suite.
-3. `uv run pytest tests/test_X.py -q` per-phase.
+3. `uv run pytest tests/test_X.py -q` per-module.
 4. `uv run ruff check --fix src tests` before committing.
 5. **One logically distinct change per commit.** History should read
    like a tutorial. If a single working session adds a feature *and*
    refactors an unrelated module *and* fixes a typo, that's three
    commits, not one. A reviewer should be able to revert any one
-   commit cleanly. Use semantic messages: "Phase N: <what>." for
-   phase landings; otherwise an imperative summary of the one
-   concept landed.
+   commit cleanly. Use semantic messages: an imperative summary of the
+   one concept landed.
 6. **Every commit has a test delta.** Either a new passing test, an xfail
    flipping to xpass, or a new xfail with explanation.
-7. **HISTORY.md after every phase boundary or significant push.** New
-   entry at the top of the journal. Date, what landed, what's next, any
-   Decisions Pending.
+7. **HISTORY.md after every significant push.** New entry at the top of
+   the journal. Date, what landed, what's next, any Decisions Pending.
 8. **New features and changed API surface require a review against
    [`security/threat-model.md`](security/threat-model.md).** Walk the
    guarantees (no filesystem / network / subprocess, no introspection
@@ -114,9 +146,8 @@ The 38 `.star` files come from Bazel's `ScriptTest`. Idioms:
 - See Bazel's `net.starlark.java.eval.ScriptTest` for the canonical
   implementation of the test driver.
 
-Phase 13 wires `tests/test_conformance.py` to parameterize over these files,
-honoring chunks and expectations. Until then, they're parser/lexer smoke
-tests only.
+The suite is wired in `tests/test_conformance.py`, which parameterizes over
+these files, honoring chunks and expectations.
 
 ## Reference priority order
 
@@ -130,18 +161,20 @@ When unsure about an edge case:
 
 Stop and ask the user when:
 - A Decision is Pending per the architectural rules.
-- Conformance pass rate stops growing for two consecutive phases.
-- Conformance pass rate exceeds 95%.
+- A change would cause a conformance regression (new failures in
+  `tests/test_conformance.py`).
+- You are asked to make a large architectural change (refactor across >3
+  modules).
 
 Do NOT stop because:
-- A phase is hard. Read more reference code.
 - A test fails. Fix it or xfail it with explanation.
 - You're uncertain about a small detail. Pick the obvious option, document it
   in the HISTORY.md journal, move on.
 
-## Branch and push
+## Branches
 
-- Branch: `claude/starlark-java-to-python-S9D2u`. Stay on it.
+- Work on a feature branch. The specific branch name varies by session;
+  check with the user if unsure.
 - Force-push is fine — the branch is yours.
 - Do NOT create pull requests unless the user explicitly asks.
 - Do NOT push to other branches.
