@@ -98,6 +98,28 @@ def test_elems():
     assert list(v) == ["a", "b", "c"]
 
 
+def test_elem_ords():
+    v = expr("'Hello'.elem_ords()")
+    assert list(v) == [72, 101, 108, 108, 111]
+    # non-ASCII
+    v2 = expr("'世'.elem_ords()")
+    assert list(v2) == [0xE4, 0xB8, 0x96]  # UTF-8 bytes
+
+
+def test_codepoints():
+    v = expr("'Hello'.codepoints()")
+    assert list(v) == ["H", "e", "l", "l", "o"]
+    v2 = expr("'世'.codepoints()")
+    assert list(v2) == ["世"]
+
+
+def test_codepoint_ords():
+    v = expr("'Hello'.codepoint_ords()")
+    assert list(v) == [72, 101, 108, 108, 111]
+    v2 = expr("'世'.codepoint_ords()")
+    assert list(v2) == [0x4E16]  # 19990
+
+
 # ----------------------------------------------------------- list
 
 

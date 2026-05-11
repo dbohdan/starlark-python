@@ -307,6 +307,27 @@ def b_hash(x: Any) -> int:
     raise EvalError(f"unhashable type: {starlark_type(x)!r}")
 
 
+# ---------------------------------------------------------------- chr / ord
+
+
+def b_chr(i: Any) -> str:
+    """Return the string representing a character whose Unicode code point is i."""
+    if isinstance(i, bool) or not isinstance(i, int):
+        raise EvalError(f"chr() requires an int, got {starlark_type(i)}")
+    if i < 0 or i > 0x10FFFF:
+        raise EvalError("chr() arg not in range(0x110000)")
+    return chr(i)
+
+
+def b_ord(s: Any) -> int:
+    """Return the integer Unicode code point of a one-character string."""
+    if not isinstance(s, str):
+        raise EvalError(f"ord() requires a string, got {starlark_type(s)}")
+    if len(s) != 1:
+        raise EvalError(f"ord() expected a string of length 1, got length {len(s)}")
+    return ord(s)
+
+
 # ---------------------------------------------------------------- collections
 
 
@@ -540,6 +561,8 @@ def make_universal() -> dict[str, Any]:
         ("float", b_float),
         ("abs", b_abs),
         ("hash", b_hash),
+        ("chr", b_chr),
+        ("ord", b_ord),
         ("list", b_list),
         ("tuple", b_tuple),
         ("dict", b_dict),

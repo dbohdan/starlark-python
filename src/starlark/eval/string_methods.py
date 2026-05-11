@@ -279,13 +279,34 @@ def s_istitle(s: str) -> bool:
     return s.istitle()
 
 
-# ---------------------------------------------------------------- elems
+# ---------------------------------------------------------------- elems / elem_ords / codepoints / codepoint_ords
 
 
 def s_elems(s: str) -> StarlarkList:
     from .builtins import _mut
 
     return StarlarkList(list(s), _mut())
+
+
+def s_elem_ords(s: str) -> StarlarkList:
+    """Return the UTF-8 byte values of the string as a list of ints."""
+    from .builtins import _mut
+
+    return StarlarkList(list(s.encode("utf-8")), _mut())
+
+
+def s_codepoints(s: str) -> StarlarkList:
+    """Return the string split into single-code-point substrings."""
+    from .builtins import _mut
+
+    return StarlarkList(list(s), _mut())
+
+
+def s_codepoint_ords(s: str) -> StarlarkList:
+    """Return the integer Unicode code points of the string."""
+    from .builtins import _mut
+
+    return StarlarkList([ord(c) for c in s], _mut())
 
 
 # ---------------------------------------------------------------- format
@@ -451,6 +472,9 @@ def register_all() -> None:
         ("isupper", s_isupper),
         ("istitle", s_istitle),
         ("elems", s_elems),
+        ("elem_ords", s_elem_ords),
+        ("codepoints", s_codepoints),
+        ("codepoint_ords", s_codepoint_ords),
         ("format", s_format),
     ]
     for name, fn in pairs:

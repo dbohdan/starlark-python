@@ -177,6 +177,24 @@ matching exit status and stdout. Skip cleanly if absent.
 
 Append-only. Newest entries on top.
 
+### 2026-05-08 — Added chr, ord, elem_ords, codepoints, codepoint_ords
+
+Implemented the missing builtins `chr` and `ord` and the string methods
+`elem_ords`, `codepoints`, `codepoint_ords` from starlark-go. These
+provide Unicode code point and byte-level access to strings.
+
+- `chr(i)` returns the string for Unicode code point `i` (0..0x10FFFF).
+- `ord(s)` returns the code point of a single-character string.
+- `s.elem_ords()` returns the UTF-8 byte values of the string as a list of ints.
+- `s.codepoints()` returns the string split into single-code-point substrings.
+- `s.codepoint_ords()` returns the integer code points of the string.
+
+All methods return `StarlarkList` and respect the existing allocation
+limits. No new threat-model concerns: no recursion, no unbounded
+allocation beyond the existing container caps.
+
+Tests: 5 new tests in `test_builtins.py` and `test_methods.py`.
+
 ### 2026-05-07 — Program: cross-thread guard
 
 Made the documented per-thread limitation enforceable. Each

@@ -175,6 +175,31 @@ def test_hash():
         expr("hash([])")
 
 
+# ---------------------------------------------------------------- chr / ord
+
+
+def test_chr():
+    assert expr("chr(65)") == "A"
+    assert expr("chr(0x1F63F)") == "😿"
+    with pytest.raises(EvalError):
+        expr("chr(-1)")
+    with pytest.raises(EvalError):
+        expr("chr(0x110000)")
+    with pytest.raises(EvalError):
+        expr("chr(True)")
+
+
+def test_ord():
+    assert expr("ord('A')") == 65
+    assert expr("ord('😿')") == 0x1F63F
+    with pytest.raises(EvalError):
+        expr("ord('AB')")
+    with pytest.raises(EvalError):
+        expr("ord('')")
+    with pytest.raises(EvalError):
+        expr("ord(1)")
+
+
 # ---------------------------------------------------------------- fail
 
 
