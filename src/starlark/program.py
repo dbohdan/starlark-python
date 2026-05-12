@@ -158,9 +158,7 @@ class Program:
     ) -> Module:
         """Execute as a file. Returns the populated `Module`."""
         if self.is_expression:
-            raise ValueError(
-                "Program.exec(): source is a single expression, use .eval() instead"
-            )
+            raise ValueError("Program.exec(): source is a single expression, use .eval() instead")
         if not self._lock.acquire(blocking=False):
             raise RuntimeError(
                 "Program is in use by another thread; compile per thread "

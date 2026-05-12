@@ -116,7 +116,7 @@ def test_namespace_works_with_json_encode():
     """The json module's encoder consumes the same `fields` protocol,
     so namespaces serialize cleanly."""
     ns = namespace("user", {"name": "Ada", "age": 36})
-    result = starlark.eval('json.encode(u)', u=ns)
+    result = starlark.eval("json.encode(u)", u=ns)
     # json.encode sorts keys lexicographically.
     assert result == '{"age":36,"name":"Ada"}'
 

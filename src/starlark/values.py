@@ -154,9 +154,7 @@ def _from_value(sv: Any, depth: int) -> Any:
             "sorted(s) or list(s) in Starlark before returning"
         )
     type_name = getattr(sv, "_starlark_type", type(sv).__name__)
-    raise UnsupportedTypeError(
-        f"from_value: cannot convert Starlark value of type {type_name!r}"
-    )
+    raise UnsupportedTypeError(f"from_value: cannot convert Starlark value of type {type_name!r}")
 
 
 # --------------------------------------------------------------- namespace
