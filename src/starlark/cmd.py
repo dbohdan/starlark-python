@@ -17,6 +17,7 @@ built via `poe zipapp`.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 from pathlib import Path
 
@@ -24,6 +25,9 @@ from . import EvalError, exec_file
 from . import eval as _eval
 from .eval.loader import FileLoader
 from .syntax.errors import StarlarkSyntaxException
+
+with contextlib.suppress(ModuleNotFoundError):
+    import readline  # noqa: F401
 
 
 def main(argv: list[str] | None = None) -> int:
