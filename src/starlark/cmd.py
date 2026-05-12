@@ -20,9 +20,10 @@ import argparse
 import contextlib
 import sys
 from pathlib import Path
+from typing import Any
 
 from . import EvalError, exec_file
-from . import eval as _eval
+from . import compile as compile_starlark
 from .eval.loader import FileLoader
 from .syntax.errors import StarlarkSyntaxException
 
@@ -30,13 +31,24 @@ with contextlib.suppress(ModuleNotFoundError):
     import readline  # noqa: F401
 
 
+def evaluate(source: str, globals: dict[Any, Any]) -> tuple[Any, dict[Any, Any]]:
+    program = compile_starlark(source)
+
+    if program.is_expression:
+        return (program.eval(**globals), globals)
+
+    m = program.exec(predeclared=globals)
+    return (None, globals | m.globals)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="starlark-python")
+
     parser.add_argument(
         "-c",
-        dest="expr",
-        metavar="EXPR",
-        help="evaluate the given Starlark expression and print the result",
+        dest="source",
+        metavar="SOURCE",
+        help="evaluate the given source and print the result",
     )
     parser.add_argument(
         "script",
@@ -44,18 +56,21 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="path to a .star file to run",
     )
+
     args = parser.parse_args(argv)
 
-    if args.expr is not None:
+    if args.source is not None:
         try:
-            value = _eval(args.expr)
+            value, _ = evaluate(args.source, {})
         except (EvalError, StarlarkSyntaxException) as e:
             print(f"starlark: {e}", file=sys.stderr)
             return 1
+
         if value is not None:
             from .eval.values import repr_starlark
 
             print(repr_starlark(value))
+
         return 0
 
     if args.script is not None:
@@ -63,16 +78,21 @@ def main(argv: list[str] | None = None) -> int:
             source = args.script.read_text(encoding="utf-8")
         except OSError as e:
             print(f"starlark: {e}", file=sys.stderr)
+
             return 1
+
         loader = FileLoader(
             exec_file=exec_file,
             search_paths=[str(args.script.parent), "."],
         )
+
         try:
             exec_file(source, filename=str(args.script), loader=loader)
         except (EvalError, StarlarkSyntaxException) as e:
             print(f"starlark: {e}", file=sys.stderr)
+
             return 1
+
         return 0
 
     # No args: minimal REPL.
@@ -80,20 +100,28 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _repl() -> int:
-    print("Starlark (starlark-python). Expressions only. Press Ctrl+D to exit.")
+    globals = {}
+
+    print("Starlark (starlark-python). Press Ctrl+D to exit.")
+
     while True:
         try:
             line = input(">>> ")
         except (EOFError, KeyboardInterrupt):
             print()
+
             return 0
+
         if not line.strip():
             continue
+
         try:
-            value = _eval(line)
+            value, globals = evaluate(line, globals)
         except (EvalError, StarlarkSyntaxException) as e:
-            print(f"Error: {e}", file=sys.stderr)
+            print(f"starlark: {e}", file=sys.stderr)
+
             continue
+
         if value is not None:
             from .eval.values import repr_starlark
 
