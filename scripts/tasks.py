@@ -3,6 +3,13 @@ import zipapp as zapp
 from pathlib import Path
 
 
+def _remove_pycache(path: Path) -> None:
+    """Remove all `__pycache__` directories in `path`."""
+    for pycache in path.rglob("__pycache__"):
+        if pycache.is_dir():
+            shutil.rmtree(pycache, ignore_errors=True)
+
+
 def clean():
     """Remove built files and caches."""
     # Remove top-level build artifacts.
@@ -14,10 +21,8 @@ def clean():
         elif p.is_file():
             p.unlink(missing_ok=True)
 
-    # Remove all `__pycache__` directories.
-    for pycache in Path(".").rglob("__pycache__"):
-        if pycache.is_dir():
-            shutil.rmtree(pycache, ignore_errors=True)
+    # Clean up `__pycache__`.
+    _remove_pycache(Path("."))
 
     # Remove Pytest and Ruff caches.
     for cache_dir in (".pytest_cache", ".ruff_cache"):
@@ -43,9 +48,12 @@ def zipapp():
     zipapp_dir.mkdir(parents=True, exist_ok=True)
 
     # Copy the Starlark package into the zipapp source dir.
+    # Clean up `__pycache__`.
     src_starlark = Path("src/starlark")
     dest_starlark = zipapp_dir / "starlark"
+
     shutil.copytree(src_starlark, dest_starlark)
+    _remove_pycache(dest_starlark)
 
     # Write a `__main__.py` entry point.
     main_py = zipapp_dir / "__main__.py"
@@ -55,6 +63,7 @@ def zipapp():
     zapp.create_archive(
         str(zipapp_dir),
         str(output_file),
+        compressed=True,
         interpreter="/usr/bin/env python3",
     )
 
