@@ -30,6 +30,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = [
+  "hypothesis>=6,<7",
   "pyright==1.1.409",
   "pytest>=9,<10",
   "ruff>=0.15,<0.16",
@@ -118,7 +119,10 @@ env_list = [
 
 [tool.tox.env_run_base]
 description = "run tests"
-deps = ["pytest>=9,<10"]
+deps = [
+  "hypothesis>=6,<7",
+  "pytest>=9,<10",
+]
 commands = [
   ["pytest", "-q"],
 ]
