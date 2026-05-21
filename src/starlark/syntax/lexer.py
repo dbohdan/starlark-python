@@ -36,6 +36,16 @@ _EQUAL_TOKENS: dict[str, TokenKind] = {
     "|": TokenKind.PIPE_EQUALS,
 }
 
+# Lookup table for integer literal prefixes.
+_BASE_PREFIXES: dict[str, int] = {
+    "x": 16,
+    "X": 16,
+    "o": 8,
+    "O": 8,
+    "b": 2,
+    "B": 2,
+}
+
 
 def _is_id_start(c: str) -> bool:
     return c == "_" or ("a" <= c <= "z") or ("A" <= c <= "Z")
@@ -486,6 +496,8 @@ class Lexer:
                     return _make_int(start, self._pos, src)
                 if nx in ("o", "O"):
                     self._pos += 1
+                    if not (self._pos < n and "0" <= src[self._pos] <= "7"):
+                        self._error("invalid octal literal", start)
                     while self._pos < n and "0" <= src[self._pos] <= "7":
                         self._pos += 1
                     return _make_int(start, self._pos, src)
@@ -552,18 +564,16 @@ def _is_hex(c: str) -> bool:
 
 
 def _make_int(start: int, end: int, src: str) -> Token:
-    text = src[start:end]
-    if len(text) > 1 and text[0] == "0" and text[1] in ("x", "X"):
-        value = int(text, 16)
-    elif len(text) > 1 and text[0] == "0" and text[1] in ("o", "O"):
-        value = int(text, 8)
-    elif len(text) > 1 and text[0] == "0" and text[1] in ("b", "B"):
-        value = int(text, 2)
-    elif len(text) > 1 and text[0] == "0":
-        # The lexer has already reported leading-zero decimals as an error.
-        # We still need a value to keep the parser making progress; treat
-        # it as decimal.
-        value = int(text, 10)
-    else:
-        value = int(text, 10)
+    base = 10
+
+    if start + 1 < end and src[start] == "0":
+        base = _BASE_PREFIXES.get(src[start + 1], 10)
+
+    try:
+        value = int(src[start:end], base)
+    except ValueError:
+        # A malformed prefix with no digits.
+        # Lexer already reported the error.
+        value = 0
+
     return Token(TokenKind.INT, start, end, value)
