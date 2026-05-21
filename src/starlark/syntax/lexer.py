@@ -539,7 +539,7 @@ class Lexer:
             text = src[start : self._pos]
             try:
                 value = float(text)
-            except ValueError:
+            except (ValueError, OverflowError):
                 self._error("invalid float literal", start)
                 value = 0.0
             return Token(TokenKind.FLOAT, start, self._pos, value)
