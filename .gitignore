@@ -2,11 +2,12 @@
 
 *.egg-info/
 
+.hypothesis/
 .pytest_cache/
-.venv/
 .ruff_cache/
 .tox/
 .uv-cache/
+.venv/
 
 __pycache__/
 attic/
@@ -19,8 +20,10 @@ dist/
 *.log*
 *.py[cdoz]
 *.sw*
+.aider*
 
 .coverage
 .python-version
+RELEASE.md
 
 /help
