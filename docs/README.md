@@ -39,59 +39,53 @@ exact behavioral and string-output equivalence.
 
 ## Codebase structure
 
-    src/starlark/
-      __init__.py             Public API: eval, exec_file, compile, EvalError,
-                              Module, Thread, plus re-exports of values/syntax names.
-      values.py               Public host integration surface: Dict, StarlarkList,
-                              Mutability, to_value, from_value, namespace, etc.
-      program.py              compile() and Program (parse-once / run-many).
-      cmd.py                  Argparse CLI ('starlark-python' console script & 'python -m starlark').
-      __main__.py             Trampoline so 'python -m starlark' works.
-      syntax/                 Source -> AST. Mirrors net.starlark.java.syntax.
-        tokens.py             TokenKind enum + Token dataclass.
-        location.py           FileLocations: offset -> (line, column) lookup.
-        errors.py             SyntaxError record + StarlarkSyntaxException.
-        lexer.py              Stream-style scanner with INDENT/OUTDENT.
-        ast.py                Dataclass nodes for every grammar construct.
-        parser.py             Recursive-descent parser; produces a StarlarkFile.
-        resolver.py           Classifies each Identifier (LOCAL/FREE/GLOBAL/...);
-                              computes per-function locals + freevars; structural
-                              checks (break outside loop, etc.).
-      eval/                   Runtime. Mirrors net.starlark.java.eval.
-        errors.py             EvalError + CallFrame.
-        mutability.py         The per-Module Mutability token.
-        module.py             Module: globals dict + Mutability.
-        values.py             Native types (None/bool/int/float/str/tuple) +
-                              wrappers (StarlarkList, Dict, StarlarkSet, Range,
-                              BuiltinFunction). Helpers: starlark_type, truth,
-                              equal, less_than, repr_starlark, str_starlark,
-                              check_hashable.
-        function.py           StarlarkFunction (def / lambda) + bind_arguments.
-        evaluator.py          Tree-walking interpreter. Frame, Thread, eval_file,
-                              call.
-        methods.py            Per-type method-table dispatch (string / list /
-                              dict / set).
-        string_methods.py     All string methods.
-        collection_methods.py All list / dict / set methods.
-        builtins.py           Universal builtins (len, range, sorted, sum, ...).
-        json_module.py        json.encode / decode / encode_indent / indent.
-        test_driver.py        Bazel ScriptTest-style predeclared helpers
-                              (assert_eq, assert_, assert_fails, freeze, struct).
-        loader.py             Loader protocol + FileLoader for load() statements.
+- **`src/starlark/`** – Main package.
+  - `__init__.py` – Public API: `eval`, `exec_file`, `compile`, `EvalError`, `Module`, `Thread`, plus re‑exports of values/syntax names.
+  - `values.py` – Public host integration surface: `Dict`, `StarlarkList`, `Mutability`, `to_value`, `from_value`, `namespace`, etc.
+  - `program.py` – `compile()` and `Program` (parse‑once / run‑many).
+  - `cmd.py` – Argparse CLI (`starlark‑python` console script & `python -m starlark`).
+  - `__main__.py` – Trampoline so `python -m starlark` works.
+  - **`syntax/`** – Source → AST. Mirrors `net.starlark.java.syntax`.
+    - `tokens.py` – `TokenKind` enum + `Token` dataclass.
+    - `location.py` – `FileLocations`: offset → (line, column) lookup.
+    - `errors.py` – `SyntaxError` record + `StarlarkSyntaxException`.
+    - `lexer.py` – Stream‑style scanner with `INDENT`/`OUTDENT`.
+    - `ast.py` – Dataclass nodes for every grammar construct.
+    - `parser.py` – Recursive‑descent parser; produces a `StarlarkFile`.
+    - `resolver.py` – Classifies each `Identifier` (`LOCAL`/`FREE`/`GLOBAL`/...); computes per‑function locals + freevars; structural checks (break outside loop, etc.).
+  - **`eval/`** – Runtime. Mirrors `net.starlark.java.eval`.
+    - `errors.py` – `EvalError` + `CallFrame`.
+    - `mutability.py` – The per‑Module `Mutability` token.
+    - `module.py` – `Module`: globals dict + `Mutability`.
+    - `values.py` – Native types (`None`/`bool`/`int`/`float`/`str`/`tuple`) + wrappers (`StarlarkList`, `Dict`, `StarlarkSet`, `Range`, `BuiltinFunction`). Helpers: `starlark_type`, `truth`, `equal`, `less_than`, `repr_starlark`, `str_starlark`, `check_hashable`.
+    - `function.py` – `StarlarkFunction` (`def` / `lambda`) + `bind_arguments`.
+    - `evaluator.py` – Tree‑walking interpreter. `Frame`, `Thread`, `eval_file`, `call`.
+    - `methods.py` – Per‑type method‑table dispatch (string / list / dict / set).
+    - `string_methods.py` – All string methods.
+    - `collection_methods.py` – All list / dict / set methods.
+    - `builtins.py` – Universal builtins (`len`, `range`, `sorted`, `sum`, ...).
+    - `json_module.py` – `json.encode` / `decode` / `encode_indent` / `indent`.
+    - `test_driver.py` – Bazel `ScriptTest`‑style predeclared helpers (`assert_eq`, `assert_`, `assert_fails`, `freeze`, `struct`).
+    - `loader.py` – `Loader` protocol + `FileLoader` for `load()` statements.
 
-    tests/                    Pytest suite, ~400 tests.
-      test_lexer.py / test_parser.py / test_resolver.py / test_values.py /
-      test_eval.py / test_methods.py / test_builtins.py / test_load.py /
-      test_json.py
-      test_lexer_conformance.py / test_parser_conformance.py /
-      test_resolver_conformance.py
-      test_conformance.py     Parameterized over conformance/*.star, splits
-                              chunks on '\\n---\\n', honors '### regex' error
-                              markers exactly as Bazel ScriptTest.java does.
-      test_cross_validation.py Optional cross-check against starlark-go's
-                              binary; skipped cleanly when not on PATH.
+- **`tests/`** – Pytest suite, ~580 tests.
+  - `test_lexer.py`
+  - `test_parser.py`
+  - `test_resolver.py`
+  - `test_values.py`
+  - `test_eval.py`
+  - `test_methods.py`
+  - `test_builtins.py`
+  - `test_load.py`
+  - `test_json.py`
+  - `test_lexer_conformance.py`
+  - `test_parser_conformance.py`
+  - `test_resolver_conformance.py`
+  - `test_conformance.py` – Parameterised over `conformance/*.star`, splits chunks on `\n---\n`, honours `### regex` error markers exactly as Bazel `ScriptTest.java` does.
+  - `test_cross_validation.py` – Optional cross‑check against `starlark-go`'s binary; skipped cleanly when not on `PATH`.
+  - `test_properties.py` – Property‑based tests using [Hypothesis](https://hypothesis.readthedocs.io/) for `eval`, `exec_file`, and round-trip conversion of Python values.
 
-    conformance/              38 .star files copied verbatim from Bazel.
+- **`conformance/`** – 38 `.star` files copied verbatim from Bazel.
 
 ## Public API
 

@@ -122,15 +122,13 @@ they are listed in `XFAIL_FILES` in `tests/test_conformance.py`.
 
 ## Layout
 
-```
-conformance/      `.star` conformance tests, copied from Bazel.
-src/starlark/     The actual port.
-    eval/         Value model, evaluator, builtins, methods, loader.
-    syntax/       Lexer, parser, AST, resolver.
-    tests/        Pytest suite (unit + conformance).
-    HISTORY.md    Original 14-phase plan + append-only journal.
-    cmd.py        CLI entry point.
-```
+- [**`conformance/`**](conformance/) – `.star` conformance tests, copied from Bazel.
+- [**`src/starlark/`**](src/starlark/) – The actual port.
+  - [`eval/`](src/starlark/eval/) – Value model, evaluator, builtins, methods, loader.
+  - [`syntax/`](src/starlark/syntax/) – Lexer, parser, AST, resolver.
+  - [`cmd.py`](src/starlark/cmd.py) – CLI entry point.
+- [`tests/`](tests/) – Pytest suite (unit + conformance + property-based).
+- [`HISTORY.md`](HISTORY.md) – Original 14-phase plan + append-only journal.
 
 ## Development
 
@@ -138,7 +136,7 @@ Install [Poe the Poet](https://poethepoet.natn.io/) to run the tasks (`uv tool i
 
 ```sh
 uv sync           # Install deps
-poe test          # ~400 tests, ~2s
+poe test          # ~580 tests, ~3s
 poe lint          # Ruff
 poe typecheck     # Pyright
 poe zipapp        # Build ./starlark-python.pyz
