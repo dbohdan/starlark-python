@@ -22,7 +22,7 @@ ALLOWED_EXCEPTIONS = (
 
 
 @given(st.text(max_size=1000))
-@settings(deadline=None)
+@settings(deadline=None, max_examples=500)
 def test_eval_handles_arbitrary_strings_without_crashing(source: str):
     """Verify that evaluation of arbitrary strings
     only raises expected Starlark exceptions or standard resource/parsing limits,
@@ -34,7 +34,7 @@ def test_eval_handles_arbitrary_strings_without_crashing(source: str):
 
 
 @given(st.text(max_size=1000))
-@settings(deadline=None)
+@settings(deadline=None, max_examples=500)
 def test_exec_handles_arbitrary_strings_without_crashing(source: str):
     """Verify that execution of arbitrary strings
     only raises expected Starlark exceptions or standard resource/parsing limits,
@@ -102,7 +102,8 @@ def assert_equivalent(a: Any, b: Any) -> None:
 @given(starlark_values)
 @settings(deadline=None)
 def test_value_roundtrips_to_starlark_and_back(val):
-    """Verify that converting Python values to Starlark and back, or evaluating their repr, preserves equivalence."""
+    """Verify that converting Python values to Starlark and back,
+    or evaluating their repr, preserves equivalence."""
     # Convert Python value to Starlark value and back.
     sv = starlark.to_value(val)
     py_val = starlark.from_value(sv)
@@ -116,7 +117,8 @@ def test_value_roundtrips_to_starlark_and_back(val):
 
 
 def test_mutability_token_enforces_freeze():
-    """Verify that mutating a list or dict after freezing its mutability token raises EvalError."""
+    """Verify that mutating a list or dict
+    after freezing its mutability token raises EvalError."""
     mut = starlark.Mutability("test")
 
     l = starlark.to_value([1, 2, 3], mutability=mut)
