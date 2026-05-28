@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
 
         loader = FileLoader(
             exec_file=exec_file,
-            search_paths=[str(args.script.parent), "."],
+            search_paths=[args.script.parent, "."],
         )
 
         try:

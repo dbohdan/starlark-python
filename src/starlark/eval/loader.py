@@ -18,6 +18,7 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from .errors import EvalError
@@ -31,7 +32,7 @@ class FileLoader:
 
     __slots__ = ("_cache", "_exec_file", "_search_paths")
 
-    def __init__(self, exec_file: Callable, search_paths: list[str] | None = None) -> None:
+    def __init__(self, exec_file: Callable, search_paths: list[str | Path] | None = None) -> None:
         # `exec_file` is starlark.exec_file, passed in to avoid a circular import.
         self._cache: dict[str, Module] = {}
         self._search_paths = list(search_paths) if search_paths else ["."]
@@ -40,7 +41,6 @@ class FileLoader:
     def __call__(self, name: str) -> Module:
         if name in self._cache:
             return self._cache[name]
-        from pathlib import Path
 
         for base in self._search_paths:
             p = Path(base) / name
