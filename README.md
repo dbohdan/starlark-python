@@ -53,9 +53,8 @@ m.globals["z"]  # 120
 ```
 ## Users
 
-Programs that embed Starlark in Python.
-
-- [Lark Cycles](https://github.com/dbohdan/lark-cycles): This Python/Tkinter/Starlark port of the 1988 Amiga programming game [_Warrior Cycles_](https://corewar.co.uk/warriorcycles.htm) by Rico Mariana was developed as a demo for Starlark in Python.
+- [dbohdan.com SSG](https://dbohdan.com/about#metadata-reuse): the site owner has switched the custom static site generator from TOML to Starlark for metadata reuse.
+- [Lark Cycles](https://github.com/dbohdan/lark-cycles): this Python/Tkinter/Starlark port of the 1988 Amiga programming game [_Warrior Cycles_](https://corewar.co.uk/warriorcycles.htm) by Rico Mariana was developed as a demo for Starlark in Python.
 - [Remarshal](https://github.com/remarshal-project/remarshal): a format converter between CBOR, JSON, MessagePack, TOML, and YAML 1.1 & 1.2.
   Remarshal gained the ability to modify the data it converted with Starlark.
   Part of the motivation for Starlark in Python was to add this functionality without a Go or Rust dependency.
