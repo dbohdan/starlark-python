@@ -17,7 +17,7 @@ Example:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +32,9 @@ class FileLoader:
 
     __slots__ = ("_cache", "_exec_file", "_search_paths")
 
-    def __init__(self, exec_file: Callable, search_paths: list[str | Path] | None = None) -> None:
+    def __init__(
+        self, exec_file: Callable, search_paths: Sequence[str | Path] | None = None
+    ) -> None:
         # `exec_file` is starlark.exec_file, passed in to avoid a circular import.
         self._cache: dict[str, Module] = {}
         self._search_paths = list(search_paths) if search_paths else ["."]
@@ -53,7 +55,9 @@ class FileLoader:
         raise EvalError(f"cannot load {name!r}: file not found")
 
 
-def perform_load(loader: Loader | None, module_name: str, bindings: list) -> dict[str, Any]:
+def perform_load(
+    loader: Loader | None, module_name: str, bindings: Sequence[tuple[str, str]]
+) -> dict[str, Any]:
     """Resolve a load() statement against `loader`.
 
     `bindings` is a list of (local_name, original_name) pairs. Returns the

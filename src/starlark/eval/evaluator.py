@@ -16,7 +16,7 @@ error (bad type, division by zero, frozen mutation, etc.).
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, TypeGuard
 
 from ..syntax import ast
@@ -146,8 +146,8 @@ class Thread:
     def __init__(
         self,
         module: Module,
-        predeclared: dict[str, Any] | None = None,
-        universal: dict[str, Any] | None = None,
+        predeclared: Mapping[str, Any] | None = None,
+        universal: Mapping[str, Any] | None = None,
         locs: FileLocations | None = None,
         loader=None,
         max_depth: int | None = None,

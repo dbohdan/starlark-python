@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from .eval.builtins import make_universal
@@ -75,8 +75,8 @@ def exec_file(
     source: str,
     filename: str = "<file>",
     *,
-    predeclared: dict[str, Any] | None = None,
-    universal: dict[str, Any] | None = None,
+    predeclared: Mapping[str, Any] | None = None,
+    universal: Mapping[str, Any] | None = None,
     loader: Callable[[str], Module] | None = None,
     max_steps: int | None = None,
     on_max_steps: Callable[[Thread], None] | None = None,

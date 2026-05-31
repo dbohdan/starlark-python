@@ -25,7 +25,7 @@ Functions:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -123,7 +123,9 @@ class StarlarkList:
 
     _starlark_type = "list"
 
-    def __init__(self, items: list | None = None, mutability: Mutability | None = None) -> None:
+    def __init__(
+        self, items: Sequence[Any] | None = None, mutability: Mutability | None = None
+    ) -> None:
         self._data: list = list(items) if items else []
         self.mutability = mutability if mutability is not None else IMMUTABLE
         _charge(list_alloc(len(self._data)))
@@ -258,7 +260,7 @@ class Dict:
 
     def __init__(
         self,
-        items: dict | None = None,
+        items: Mapping[Any, Any] | None = None,
         mutability: Mutability | None = None,
     ) -> None:
         # Python 3.7+ dicts preserve insertion order, which matches Starlark.

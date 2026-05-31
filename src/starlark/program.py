@@ -21,7 +21,7 @@ purposes (it overwrites `Identifier.binding`, `DefStatement.locals`,
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from .eval.builtins import make_universal, with_mutability, with_thread
@@ -89,8 +89,8 @@ class Program:
     def eval(
         self,
         *,
-        predeclared: dict[str, Any] | None = None,
-        universal: dict[str, Any] | None = None,
+        predeclared: Mapping[str, Any] | None = None,
+        universal: Mapping[str, Any] | None = None,
         max_steps: int | None = None,
         on_max_steps: Callable[[Thread], None] | None = None,
         max_allocs: int | None = None,
@@ -148,8 +148,8 @@ class Program:
     def exec(
         self,
         *,
-        predeclared: dict[str, Any] | None = None,
-        universal: dict[str, Any] | None = None,
+        predeclared: Mapping[str, Any] | None = None,
+        universal: Mapping[str, Any] | None = None,
         max_steps: int | None = None,
         on_max_steps: Callable[[Thread], None] | None = None,
         max_allocs: int | None = None,
@@ -190,7 +190,7 @@ class Program:
             self._lock.release()
 
 
-def _resolve(file: _ast.StarlarkFile, locs, pre: dict, uni: dict) -> None:
+def _resolve(file: _ast.StarlarkFile, locs, pre: Mapping, uni: Mapping) -> None:
     """Resolve `file` against the given env. Raises on resolver errors.
 
     Clears any errors from a previous run on the same file before
