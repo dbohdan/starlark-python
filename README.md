@@ -109,6 +109,9 @@ These are intentional:
 - **Integers are Python `int`.**
   Arbitrary precision; no overflow.
   The Java reference uses a `StarlarkInt` type that is a union of `int32`, `int64`, and `BigInteger`.
+- **Integer magnitude is bounded.**
+  A Starlark integer is hard-capped at `MAX_INT_BITS = 2^19` bits (~158k decimal digits) to bound per-operation CPU.
+  The Java reference's `BigInteger` is unbounded; this cap is far above any realistic configuration value, and operations that would exceed it raise a clean `EvalError`.
 - **Strings are indexed by Unicode code point.**
   The Java reference indexes by UTF-16 code unit, which produces surprising results for non-BMP characters.
   The spec leaves this implementation-defined.

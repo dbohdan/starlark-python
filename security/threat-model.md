@@ -123,10 +123,13 @@ Charge-only — values that go out of scope are **not refunded**. The
 counter measures *cumulative allocation*, not live-memory residency.
 Charged in every container constructor (`StarlarkList`, `Dict`,
 `StarlarkSet`, `Range`), every mutating concat / extend / insert, and
-every `+` / `*` that produces a new container or string. Sizes are
-approximate (rounded constants in `eval/limits.py`); precise residency
-would need `weakref` GC tracking, which the cost-estimates document
-rejected as too complex for the security benefit.
+every `+` / `*` that produces a new container or string. Large integers
+are charged linearly by their `bit_length` in every int-producing
+arithmetic branch; `bool` / `None` / `float` are not charged (interned
+or near-zero per-instance cost). Sizes are approximate (rounded
+constants in `eval/limits.py`); precise residency would need `weakref`
+GC tracking, which the cost-estimates document rejected as too complex
+for the security benefit.
 
 The cumulative-vs-live semantics matter: a program that allocates 64
 MB in scratch values and lets them GC'd will still report 64 MB used.
@@ -166,12 +169,23 @@ host even when no `max_*` is set:
   through the same cap with operand-aware messages
   (`excessive repeat (length * factor elements)` or
   `got X for repeat, want value in signed 32-bit range`).
+- **`MAX_INT_BITS = 2^19`** (`eval/limits.py`). Unlike the Java
+  reference's unbounded `BigInteger`, a Starlark integer's magnitude is
+  hard-capped at ~158k decimal digits. Checked a priori at the only
+  sites that can grow an int past the cap (`int * int`, `int << n`,
+  `int + / - int`, `int()` from a string/float, and integer literals),
+  so a squaring loop or accumulating shift aborts with a clean
+  `EvalError` *before* the oversized multiply runs. `//`, `%`, `>>`,
+  `&`, `|`, `^`, `abs`, and unary `-`/`+`/`~` cannot exceed the larger
+  operand, so the invariant holds for them for free.
 - **`MAX_NESTING_DEPTH = 256`**. Both the parser and the evaluator
   track AST-walk depth and abort with a clean
   `StarlarkSyntaxException` / `EvalError` before Python's
-  `RecursionError` fires. `repr_starlark` has the same cap so deeply
-  nested values built at runtime
-  (`for i in range(N): x = [x]`) don't blow the stack on print.
+  `RecursionError` fires. `repr_starlark` has the same cap, and value
+  comparison (`equal` / `less_than` / `in`) is bounded at the value
+  level too, so deeply nested values built at runtime
+  (`for i in range(N): x = [x]`) don't blow the stack on print,
+  `x == x`, `x in [x]`, or `sorted([x, x])`.
 - **JSON decoder depth cap.** Same constant; documented in
   `eval/json_module.py`.
 - **Recursion forbidden** (per spec). User functions cannot call

@@ -177,6 +177,45 @@ matching exit status and stdout. Skip cleanly if absent.
 
 Append-only. Newest entries on top.
 
+### 2026-06-09 — Resource-bounding and error-normalization hardening
+
+Addressed a Claude Fable security review that found four classes of issue
+on the resource-bounding and error-normalization axes (the action-isolation
+boundary was confirmed sound and untouched). Landed as seven focused
+commits:
+
+1. **`%c` format guard.** `'%c' % 1114112` / `'%c' % 10**12` leaked a raw
+   `ValueError` / `OverflowError`; the `%c` branch now reuses the `chr()`
+   builtin's range check.
+2. **Value-level depth bounding.** `MAX_NESTING_DEPTH` was enforced
+   statically but not in value-structural recursion, so a runtime-built deep
+   value leaked a `RecursionError` on `x == x`, `x in [x]`, `sorted([x,x])`.
+   Threaded a `_depth` kwarg through `equal` / `less_than` / `_contains`;
+   the existing `_EQUAL_SEEN` cycle detection is preserved.
+3. **Oversized-int stringification.** CPython's `int_max_str_digits` cap
+   leaked a raw `ValueError` from `str`/`repr`/`%s`/`%d`/`.format()`; now
+   normalized to `EvalError` at the conversion sites (no global
+   `set_int_max_str_digits`, which would reintroduce the DoS).
+4. **Builtin-dispatch catch-all.** Non-`EvalError`/`TypeError` exceptions
+   escaped raw, breaking the `except EvalError` host contract. Added a
+   catch-all that normalizes to `EvalError`; `ResourceLimitExceeded`
+   subclasses pass through unchanged and `MemoryError` is deliberately
+   re-raised (host-environment failure, not a Starlark error).
+5. **Narrowed the TypeError catch.** It string-munged *any* TypeError into
+   an arg-binding message; now only genuine binding failures (deepest
+   traceback frame is dispatch plumbing) are rewritten, so internal faults
+   aren't mislabeled.
+6. **Integer magnitude cap.** `MAX_INT_BITS = 2^19`, checked a priori at the
+   growing sites (`*`, `<<`, `+`/`-`, `int()`, literals); a heap charge
+   linear in `bit_length` on every int-producing branch. A divergence from
+   the Java reference's unbounded `BigInteger`.
+7. **Docs.** Updated `threat-model.md` and `README.md`; marked the two
+   2026-05-05 reviews superseded.
+
+Tests: new regressions in `test_methods.py`, `test_depth_limits.py`,
+`test_eval.py`, `test_limits.py`, `test_heap_counter.py`. Conformance
+unchanged (same four documented xfails).
+
 ### 2026-05-08 — Added chr, ord, elem_ords, codepoints, codepoint_ords
 
 Implemented the missing builtins `chr` and `ord` and the string methods

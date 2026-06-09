@@ -1,5 +1,11 @@
 # Security Review of the Starlark Implementation
 
+> **Superseded.** This review predates the resource-limit implementation
+> (step counter, heap counter, `MAX_CONTAINER_ELEMENTS`, `MAX_NESTING_DEPTH`,
+> `MAX_INT_BITS`, and value-level depth bounding). Its "no step/heap counter"
+> finding is stale; see [`threat-model.md`](threat-model.md) for the current
+> state. Retained for historical context.
+
 **Date:** 2026-05-04  
 **Reviewer:** DeepSeek V4 Pro
 **Scope:** The pure-Python Starlark interpreter in this repository, assessed against the threat model described in the project’s design discussions.

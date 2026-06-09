@@ -1,5 +1,12 @@
 # Security Review of the Starlark Implementation (Gemini)
 
+> **Superseded.** This review predates the resource-limit implementation
+> (step counter, heap counter, `MAX_CONTAINER_ELEMENTS`, `MAX_NESTING_DEPTH`,
+> `MAX_INT_BITS`, and value-level depth bounding). Its "Resource Exhaustion
+> (Critical Gap)" / "no step/heap counter" finding is stale; see
+> [`threat-model.md`](threat-model.md) for the current state. Retained for
+> historical context.
+
 **Date:** 2026-05-05  
 **Reviewer:** Gemini (Expert Software Developer)  
 **Scope:** Pure-Python Starlark interpreter implementation.
