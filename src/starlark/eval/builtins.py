@@ -20,6 +20,7 @@ from .values import (
     Range,
     StarlarkList,
     StarlarkSet,
+    check_and_charge_int,
     check_hashable,
     equal,
     less_than,
@@ -398,7 +399,11 @@ def b_range(*args) -> Range:
 def b_enumerate(x: Any, start: int = 0) -> StarlarkList:
     if not _is_int(start):
         raise EvalError("enumerate() start must be int")
-    return StarlarkList([(i + start, v) for i, v in enumerate(_drain(x))], _mut())
+    # `i + start` goes through the same integer-magnitude cap as `+` would in
+    # Starlark, so enumerate can't smuggle an over-cap int past the invariant.
+    return StarlarkList(
+        [(check_and_charge_int(i + start), v) for i, v in enumerate(_drain(x))], _mut()
+    )
 
 
 def b_zip(*args) -> StarlarkList:
@@ -494,6 +499,10 @@ def b_sum(x: Any, start: Any = 0) -> Any:
     total = start
     for v in _to_iter(x):
         total = total + v
+        # Charge and cap each int running total, exactly as the equivalent
+        # `total = total + v` written in Starlark would via the `+` operator.
+        if _is_int(total):
+            check_and_charge_int(total)
     return total
 
 

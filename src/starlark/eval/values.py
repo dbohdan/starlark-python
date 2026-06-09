@@ -36,7 +36,9 @@ from .limits import (
     ALLOC_RANGE,
     ALLOC_SET_ENTRY,
     MAX_NESTING_DEPTH,
+    check_int_bits,
     dict_alloc,
+    int_alloc,
     list_alloc,
     set_alloc,
 )
@@ -57,6 +59,25 @@ def _charge(n: int) -> None:
     thread = _CURRENT_THREAD.get(None)
     if thread is not None:
         thread.add_allocs(n)
+
+
+def check_and_charge_int(r: int) -> int:
+    """Enforce the integer-magnitude cap and charge the result's heap cost.
+
+    The single entry point for code that produces an int in Python rather
+    than through the evaluator's arithmetic operators — currently the `sum`
+    and `enumerate` builtins. Keeping these on the same cap as `*`, `+`, and
+    `<<` means there are no special cases to remember: every integer a
+    Starlark program can observe has passed the same `MAX_INT_BITS` check.
+
+    The operands at these sites are already capped, so checking post-op is
+    safe (the addition itself is cheap and cannot exceed the larger operand
+    by more than a bit); the cap, not this charge, is the per-op CPU bound.
+    """
+    bits = r.bit_length()
+    check_int_bits(bits)
+    _charge(int_alloc(bits))
+    return r
 
 
 # --------------------------------------------------------------- type names
@@ -883,6 +904,7 @@ __all__ = [
     "Range",
     "StarlarkList",
     "StarlarkSet",
+    "check_and_charge_int",
     "check_hashable",
     "equal",
     "less_than",

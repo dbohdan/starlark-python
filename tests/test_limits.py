@@ -137,3 +137,36 @@ def test_floordiv_mod_shift_on_cap_sized_int_do_not_trip():
     )
     assert m.globals["a"].bit_length() <= MAX_INT_BITS
     assert m.globals["c"].bit_length() <= MAX_INT_BITS
+
+
+def test_sum_respects_int_cap():
+    from starlark.eval.limits import MAX_INT_BITS
+
+    # Build x with exactly MAX_INT_BITS bits (512-bit shift chunks + remainder),
+    # then sum two of them: x + x is MAX_INT_BITS + 1 bits, over the cap. sum()
+    # computes in Python, so this proves it honors the same cap as `+`.
+    full = (MAX_INT_BITS - 1) // 512
+    rem = (MAX_INT_BITS - 1) - full * 512
+    src = f"x = 1\nfor i in range({full}):\n    x = x << 512\n"
+    if rem:
+        src += f"x = x << {rem}\n"
+    src += "s = sum([x, x])\n"
+    with pytest.raises(EvalError, match="too large"):
+        starlark.exec_file(src)
+
+
+def test_check_and_charge_int_rejects_oversized():
+    from starlark.eval.limits import MAX_INT_BITS
+    from starlark.eval.values import check_and_charge_int
+
+    check_and_charge_int(1 << (MAX_INT_BITS - 1))  # exactly the cap: allowed
+    with pytest.raises(EvalError, match="too large"):
+        check_and_charge_int(1 << MAX_INT_BITS)  # one bit over: rejected
+
+
+def test_sum_and_enumerate_normal_still_work():
+    assert starlark.eval("sum([1, 2, 3])") == 6
+    assert starlark.eval("sum([1.0, 2, 3])") == 6.0
+    assert starlark.eval("sum([], 10)") == 10
+    out = starlark.eval("enumerate(['a', 'b'], 5)")
+    assert list(out) == [(5, "a"), (6, "b")]
