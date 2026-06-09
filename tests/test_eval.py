@@ -322,3 +322,34 @@ def test_builtin_resource_limit_not_masked():
     fn = BuiltinFunction(name="over_limit", impl=over_limit)
     with pytest.raises(StepLimitExceeded):
         run("over_limit()\n", over_limit=fn)
+
+
+def test_internal_typeerror_not_mislabeled_as_arg_error():
+    # A TypeError raised *inside* a builtin (not at the call boundary) must
+    # not be string-munged into an argument-binding message. It should reach
+    # the host as a normalized EvalError carrying the original text.
+    from starlark.eval import BuiltinFunction
+
+    def internal_fault():
+        return None + 1  # raises TypeError inside the body
+
+    fn = BuiltinFunction(name="internal_fault", impl=internal_fault)
+    with pytest.raises(EvalError, match="TypeError") as exc:
+        run("internal_fault()\n", internal_fault=fn)
+    # The arg-binding rewrite strips an "() " prefix and quotes; a genuine
+    # internal fault keeps its message intact.
+    assert "unsupported operand" in exc.value.message
+
+
+def test_arg_binding_typeerror_still_rewritten():
+    # A real arity mismatch still gets the cleaned-up, Java-style message.
+    from starlark.eval import BuiltinFunction
+
+    def takes_none():
+        return 1
+
+    fn = BuiltinFunction(name="takes_none", impl=takes_none)
+    with pytest.raises(EvalError) as exc:
+        run("takes_none(1, 2, 3)\n", takes_none=fn)
+    assert "takes_none()" not in exc.value.message
+    assert "TypeError" not in exc.value.message

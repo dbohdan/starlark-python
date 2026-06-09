@@ -1012,6 +1012,41 @@ def _eval_call(expr: ast.CallExpression, frame: Frame, thread: Thread) -> Any:
     return call(fn, positional, keyword, thread, position=_pos(expr.start, thread))
 
 
+def _is_arg_binding_error(e: TypeError) -> bool:
+    """True if `e` is CPython's argument-binding TypeError, not an internal one.
+
+    A binding failure (wrong arity, unexpected keyword, ...) is raised before
+    the builtin's body executes, so the deepest frame in its traceback is one
+    of our two dispatch-plumbing frames: the `call` site here, or the
+    receiver-binding wrapper in `methods._bind`. A TypeError raised from inside
+    a builtin's body leaves that body's frame as the deepest one, so we leave
+    it for the catch-all instead of mislabeling it as an argument error.
+    """
+    tb = e.__traceback__
+    if tb is None:
+        return False
+    while tb.tb_next is not None:
+        tb = tb.tb_next
+    from . import methods
+
+    code = tb.tb_frame.f_code
+    return code is call.__code__ or code is methods.WRAPPER_CODE
+
+
+def _wrap_unexpected_builtin_error(
+    e: Exception, fn_name: str, position: Position | None
+) -> EvalError:
+    """Normalize an unexpected builtin exception into an EvalError.
+
+    Used by the dispatch catch-all and the internal-TypeError path so a
+    Python exception a builtin didn't anticipate still reaches the host as
+    the EvalError its contract promises.
+    """
+    err = EvalError(f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
+    err.push_frame(fn_name, position)
+    return err
+
+
 def call(
     fn: Any,
     positional: list,
@@ -1034,10 +1069,16 @@ def call(
             e.push_frame(fn.name, position)
             raise
         except TypeError as e:
-            # Translate Python's argument-binding TypeError into something
-            # closer to the Java reference's wording. The raw message looks
-            # like `d_pop() missing 1 required positional argument: 'key'`;
-            # we strip the implementation-detail prefix and the quotes.
+            # Only rewrite a *genuine argument-binding* TypeError. A TypeError
+            # raised from inside the builtin's body (e.g. an internal
+            # `None + 1`) would mask a real fault if relabeled as an argument
+            # error, so send those to the catch-all instead.
+            if not _is_arg_binding_error(e):
+                raise _wrap_unexpected_builtin_error(e, fn.name, position) from e
+            # Translate the binding error into something closer to the Java
+            # reference's wording. The raw message looks like
+            # `d_pop() missing 1 required positional argument: 'key'`; we strip
+            # the implementation-detail prefix and the quotes.
             msg = str(e)
             if "() " in msg:
                 msg = msg.split("() ", 1)[1]
@@ -1058,9 +1099,7 @@ def call(
             # host contract. Normalize it. Specific normalizations elsewhere
             # (chr range, oversized-int stringification) still run first, so
             # this only catches what nothing else anticipated.
-            err = EvalError(f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
-            err.push_frame(fn.name, position)
-            raise err from e
+            raise _wrap_unexpected_builtin_error(e, fn.name, position) from e
     if isinstance(fn, StarlarkFunction):
         # Recursion check: based on the *syntactic* identity of the def/lambda
         # AST node, not the StarlarkFunction value, so two closures created

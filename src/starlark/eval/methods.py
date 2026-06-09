@@ -7,6 +7,7 @@ the method tables for strings and collections.
 
 from __future__ import annotations
 
+import types
 from collections.abc import Callable
 from typing import Any
 
@@ -30,6 +31,13 @@ def _bind(name: str, value: Any, impl: Callable) -> BuiltinFunction:
         impl=lambda *a, **kw: impl(value, *a, **kw),
         self_repr=type_name,
     )
+
+
+# Code object of the receiver-binding wrapper lambda in `_bind`. The evaluator
+# uses it to recognize a genuine argument-binding TypeError: such an error
+# fails inside this wrapper (when `impl(value, ...)` is bound) before the real
+# method body runs, so this lambda is the deepest frame in its traceback.
+WRAPPER_CODE = next(c for c in _bind.__code__.co_consts if isinstance(c, types.CodeType))
 
 
 # Built per-type method tables. Each maps name -> (callable taking the
