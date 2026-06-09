@@ -1301,7 +1301,12 @@ def _str_format(template: str, arg: Any) -> str:
             elif not _is_int(a):
                 raise EvalError(f"got {starlark_type(a)} for '%{conv}' format, want int or float")
             if conv in ("d", "i"):
-                result.append(str(a))
+                # Decimal conversion is capped by CPython's int_max_str_digits;
+                # normalize the raw ValueError. Hex/oct (x/X/o below) aren't
+                # digit-capped, so format() there needs no guard.
+                from .values import _int_to_str
+
+                result.append(_int_to_str(a))
             else:
                 result.append(format(a, conv))
         elif conv in ("e", "f", "g", "E", "F", "G"):

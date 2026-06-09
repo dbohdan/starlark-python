@@ -719,6 +719,23 @@ def less_than(a: Any, b: Any, _depth: int = 0) -> bool:
 # --------------------------------------------------------------- repr
 
 
+def _int_to_str(value: int) -> str:
+    """Decimal stringification of an int, with the CPython digit cap normalized.
+
+    CPython caps decimal int<->str conversions at `sys.int_max_str_digits`
+    (default 4300) to bound a quadratic algorithm; converting a larger int
+    leaks a raw `ValueError`. We never raise `sys.set_int_max_str_digits`
+    globally — that would reintroduce the DoS — so an int can be valid under
+    our own magnitude cap yet not default-stringifiable. Convert that
+    `ValueError` into a clean `EvalError`. (Hex/oct/bin are not digit-capped,
+    so the `%x`/`%o` format paths don't need this.)
+    """
+    try:
+        return str(value)
+    except ValueError:
+        raise EvalError("integer too large to convert to string") from None
+
+
 def repr_starlark(value: Any, _seen: set | None = None, _depth: int = 0) -> str:
     """Returns the canonical Starlark representation of a value (`repr(x)`)."""
     if _seen is None:
@@ -746,7 +763,7 @@ def repr_starlark(value: Any, _seen: set | None = None, _depth: int = 0) -> str:
     if value is False:
         return "False"
     if isinstance(value, int):
-        return str(value)
+        return _int_to_str(value)
     if isinstance(value, float):
         return _float_repr(value)
     if isinstance(value, str):

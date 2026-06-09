@@ -230,3 +230,23 @@ def test_percent_c_out_of_range_raises_evalerror():
 def test_percent_c_in_range_still_works():
     assert expr("'%c' % 65") == "A"
     assert expr("'%c' % 0x10FFFF") == chr(0x10FFFF)
+
+
+# ----------------------------------------------------------- oversized ints
+
+
+def test_oversized_int_stringification_raises_evalerror():
+    # CPython caps decimal int<->str conversion at int_max_str_digits (4300).
+    # Build an int well past that (~9.6k digits) arithmetically — a decimal
+    # literal that large would itself trip the cap at parse time — and confirm
+    # every stringifying path surfaces a clean EvalError, not a raw ValueError.
+    base = "x = 1 << 500\nfor i in range(6):\n    x = x * x\n"
+    for tail in ("y = str(x)", "y = repr(x)", "y = '%d' % x", "y = '{}'.format(x)"):
+        with pytest.raises(EvalError, match="too large"):
+            run(base + tail + "\n")
+
+
+def test_modest_int_stringification_still_works():
+    assert expr("str(1 << 500)") == str(1 << 500)
+    assert expr("'%d' % 255") == "255"
+    assert expr("'%x' % 255") == "ff"
