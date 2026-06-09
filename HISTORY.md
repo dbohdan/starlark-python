@@ -177,6 +177,33 @@ matching exit status and stdout. Skip cleanly if absent.
 
 Append-only. Newest entries on top.
 
+### 2026-06-09 — Hardening follow-up (review feedback)
+
+Addressed three robustness gaps found while reviewing the hardening work
+below:
+
+1. **`sum()` / `enumerate()` honor the integer cap.** Both compute ints in
+   Python with raw `+`, bypassing the operator-level `MAX_INT_BITS` check, so
+   `sum()` of near-cap ints could land a few bits over the cap. Routed both
+   through a shared `values.check_and_charge_int` helper, so every integer a
+   program can observe has passed the same cap — no special cases. An audit
+   confirmed no other builtin or method bypasses it (the rest produce only
+   container-bounded indices; `range` stays within its capped endpoints).
+2. **Robust argument-binding classification.** The traceback-frame heuristic
+   from the earlier commit was fragile to wrapper layers (it already broke
+   `function.star` once). Replaced it with an `inspect.signature(impl).bind`
+   check, and bound method receivers with `functools.partial` so the
+   signature reports the real parameters. Frame-independent, so future
+   wrapping can't silently misclassify.
+3. **`RecursionError` safety net.** The value-comparison depth bound stays
+   under CPython's recursion limit only by an implicit frame budget. Added a
+   boundary catch in `Program.eval/exec` that converts any leaked
+   `RecursionError` into a clean `EvalError`, plus a calibration-guard test
+   that fails loudly if a just-under-cap comparison ever overflows.
+
+Tests: regressions added to `test_limits.py`, `test_eval.py`, and
+`test_depth_limits.py`. Conformance unchanged.
+
 ### 2026-06-09 — Resource-bounding and error-normalization hardening
 
 Addressed a Claude Fable security review that found four classes of issue
