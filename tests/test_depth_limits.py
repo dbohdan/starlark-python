@@ -93,3 +93,42 @@ def test_shallow_equality_still_works():
     )
     assert m.globals["eq"] is True
     assert m.globals["inn"] is True
+
+
+def test_comparison_just_under_cap_succeeds():
+    # Calibration guard. Comparing two values nested just under
+    # MAX_NESTING_DEPTH must complete cleanly — this locks the frame budget.
+    # If a change inflates the per-level frame cost of equal() so that even a
+    # legal-depth comparison overflows the C stack, the boundary safety net
+    # turns it into an EvalError and this assertion fails loudly.
+    from starlark.eval.limits import MAX_NESTING_DEPTH
+
+    n = MAX_NESTING_DEPTH - 1
+    m = starlark.exec_file(f"x = []\nfor i in range({n}):\n    x = [x]\ny = x == x\n")
+    assert m.globals["y"] is True
+
+
+def test_leaked_recursionerror_becomes_evalerror():
+    # Safety net. Force Python's recursion limit low enough that a comparison
+    # well under MAX_NESTING_DEPTH overflows the C stack before the explicit
+    # value-level bound can fire. The evaluation boundary must convert that
+    # into a clean EvalError, never leak a raw RecursionError to the host.
+    import sys
+
+    def _stack_depth() -> int:
+        d, f = 0, sys._getframe()
+        while f is not None:
+            d += 1
+            f = f.f_back
+        return d
+
+    src = "x = []\nfor i in range(400):\n    x = [x]\ny = x == x\n"
+    old = sys.getrecursionlimit()
+    try:
+        # Enough headroom for the (shallow) parse/eval setup, far less than the
+        # ~800 frames a 400-deep comparison needs.
+        sys.setrecursionlimit(_stack_depth() + 250)
+        with pytest.raises(EvalError):
+            starlark.exec_file(src)
+    finally:
+        sys.setrecursionlimit(old)

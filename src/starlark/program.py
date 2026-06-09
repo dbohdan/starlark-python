@@ -25,6 +25,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from .eval.builtins import make_universal, with_mutability, with_thread
+from .eval.errors import EvalError
 from .eval.evaluator import Frame, Thread, _eval_expr, eval_file
 from .eval.module import Module
 from .syntax import Lexer, Parser, resolve
@@ -138,6 +139,8 @@ class Program:
             try:
                 with with_mutability(module.mutability), with_thread(thread):
                     return _eval_expr(self._expr, frame, thread)
+            except RecursionError:
+                raise _too_much_recursion() from None
             finally:
                 thread.frames.pop()
         finally:
@@ -182,12 +185,32 @@ class Program:
                 max_allocs=max_allocs,
                 on_max_allocs=on_max_allocs,
             )
-            with with_mutability(module.mutability), with_thread(thread):
-                eval_file(self._file, thread)
+            try:
+                with with_mutability(module.mutability), with_thread(thread):
+                    eval_file(self._file, thread)
+            except RecursionError:
+                raise _too_much_recursion() from None
             module.thread = thread
             return module
         finally:
             self._lock.release()
+
+
+def _too_much_recursion() -> EvalError:
+    """Convert a leaked Python `RecursionError` into a clean `EvalError`.
+
+    The interpreter bounds the *known* recursive paths explicitly — parser
+    and evaluator AST depth, value comparison, `repr`, the JSON decoder, and
+    the host converters all stop at `MAX_NESTING_DEPTH` with specific
+    messages. Those fire first in normal use. This boundary catch is the
+    safety net for the unforeseen: it guarantees the host contract
+    (`except EvalError` catches everything Starlark can throw) holds even if
+    some future recursive path is added without its own bound, or the
+    per-level frame cost of an existing one drifts. Worst case the host sees
+    this generic error instead of a specific one — never a raw
+    `RecursionError`.
+    """
+    return EvalError("maximum recursion depth exceeded during evaluation")
 
 
 def _resolve(file: _ast.StarlarkFile, locs, pre: Mapping, uni: Mapping) -> None:
