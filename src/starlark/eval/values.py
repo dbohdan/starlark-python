@@ -680,7 +680,7 @@ def equal(a: Any, b: Any, _depth: int = 0) -> bool:
         # for floats), unlike Python's IEEE-754 default.
         if isinstance(a, float) and a != a and isinstance(b, float) and b != b:
             return True
-        if isinstance(a, tuple):
+        if isinstance(a, tuple) and isinstance(b, tuple):
             if len(a) != len(b):
                 return False
             for x, y in zip(a, b, strict=True):

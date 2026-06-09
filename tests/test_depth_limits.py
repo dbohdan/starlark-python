@@ -88,9 +88,7 @@ def test_deep_ordering_rejected_at_value_level():
 
 def test_shallow_equality_still_works():
     # Well below the cap: equality and membership behave normally.
-    m = starlark.exec_file(
-        "a = [1, [2, [3]]]\nb = [1, [2, [3]]]\neq = a == b\ninn = a in [b]\n"
-    )
+    m = starlark.exec_file("a = [1, [2, [3]]]\nb = [1, [2, [3]]]\neq = a == b\ninn = a in [b]\n")
     assert m.globals["eq"] is True
     assert m.globals["inn"] is True
 

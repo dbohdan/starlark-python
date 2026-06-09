@@ -331,7 +331,7 @@ def test_internal_typeerror_not_mislabeled_as_arg_error():
     from starlark.eval import BuiltinFunction
 
     def internal_fault():
-        return None + 1  # raises TypeError inside the body
+        return None + 1  # type: ignore[operator]  # raises TypeError inside the body
 
     fn = BuiltinFunction(name="internal_fault", impl=internal_fault)
     with pytest.raises(EvalError, match="TypeError") as exc:
@@ -364,7 +364,7 @@ def test_arg_binding_detection_robust_through_partial_wrapper():
     from starlark.eval import BuiltinFunction
 
     def method(receiver, key):
-        return None + 1  # internal TypeError when called with correct arity
+        return None + 1  # type: ignore[operator]  # internal TypeError, correct arity
 
     fn = BuiltinFunction(name="m", impl=functools.partial(method, "recv"))
 

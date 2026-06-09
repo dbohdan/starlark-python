@@ -121,7 +121,9 @@ def test_int_just_under_cap_succeeds():
     from starlark.eval.limits import MAX_INT_BITS
 
     # 1 << (MAX_INT_BITS - 1) is exactly MAX_INT_BITS bits — allowed.
-    m = starlark.exec_file(f"x = 1\nfor i in range({(MAX_INT_BITS - 1) // 512}):\n    x = x << 512\n")
+    m = starlark.exec_file(
+        f"x = 1\nfor i in range({(MAX_INT_BITS - 1) // 512}):\n    x = x << 512\n"
+    )
     assert m.globals["x"].bit_length() <= MAX_INT_BITS
 
 
@@ -132,9 +134,7 @@ def test_floordiv_mod_shift_on_cap_sized_int_do_not_trip():
     # cap — none of those operations can grow the value.
     shifts = (MAX_INT_BITS - 2) // 512
     base = f"x = 1\nfor i in range({shifts}):\n    x = x << 512\n"
-    m = starlark.exec_file(
-        base + "a = x // 2\nb = x % 7\nc = x >> 1000\nd = -x\ne = x & 255\n"
-    )
+    m = starlark.exec_file(base + "a = x // 2\nb = x % 7\nc = x >> 1000\nd = -x\ne = x & 255\n")
     assert m.globals["a"].bit_length() <= MAX_INT_BITS
     assert m.globals["c"].bit_length() <= MAX_INT_BITS
 
