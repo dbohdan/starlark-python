@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 import starlark
-from starlark.eval import StarlarkSet
+from starlark.eval import EvalError, StarlarkSet
 
 
 def expr(source: str):
@@ -209,3 +211,22 @@ def test_hasattr_uses_method_table():
     assert expr("hasattr([], 'append')") is True
     assert expr("hasattr({}, 'keys')") is True
     assert expr("hasattr(1, 'append')") is False
+
+
+# ----------------------------------------------------------- %c format guard
+
+
+def test_percent_c_out_of_range_raises_evalerror():
+    # `chr()` is guarded in the builtin; the `%c` format branch must guard too,
+    # else a raw ValueError (out of range) or OverflowError (oversized) leaks.
+    with pytest.raises(EvalError, match="range"):
+        expr("'%c' % 1114112")
+    with pytest.raises(EvalError, match="range"):
+        expr("'%c' % 1000000000000")
+    with pytest.raises(EvalError, match="range"):
+        expr("'%c' % -1")
+
+
+def test_percent_c_in_range_still_works():
+    assert expr("'%c' % 65") == "A"
+    assert expr("'%c' % 0x10FFFF") == chr(0x10FFFF)

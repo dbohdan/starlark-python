@@ -1307,6 +1307,11 @@ def _str_format(template: str, arg: Any) -> str:
             result.append(_format_float(float(a), conv))
         elif conv == "c":
             if _is_int(a):
+                # Same range guard as the chr() builtin: a raw chr() leaks a
+                # ValueError on out-of-range and an OverflowError on oversized
+                # ints (e.g. `'%c' % 1114112`, `'%c' % 10**12`).
+                if a < 0 or a > 0x10FFFF:
+                    raise EvalError("%c arg not in range(0x110000)")
                 result.append(chr(a))
             elif isinstance(a, str) and len(a) == 1:
                 result.append(a)
