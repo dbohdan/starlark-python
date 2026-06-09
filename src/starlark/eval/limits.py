@@ -20,6 +20,17 @@ from .errors import EvalError
 # fail fast on accidental-or-malicious overflow.
 MAX_CONTAINER_ELEMENTS = 1 << 24
 
+# Hard cap on the bit-length of any Starlark integer. This is a deliberate
+# DIVERGENCE FROM THE JAVA REFERENCE, which uses an unbounded BigInteger.
+# Python's int is also arbitrary precision, so without a cap a hostile
+# `x = 2` / `for i in range(64): x = x * x` squaring loop reaches a
+# multi-gigabit integer in 64 cheap-looking steps and a single CPython
+# multiply of two such operands burns unbounded CPU. 2^19 bits is ~158k
+# decimal digits — far above any real configuration value — and bounds one
+# multiply of two cap-sized operands to tens of milliseconds (Karatsuba, no
+# FFT). The cap, not the coarse step counter, is what bounds per-op CPU.
+MAX_INT_BITS = 1 << 19
+
 # Cap on AST / call-stack nesting depth. The parser and evaluator each
 # recurse into Python's call stack; deep input (a 5000-level-nested list
 # literal, or a function whose body is a 5000-deep `if/elif/else`) would
@@ -41,6 +52,19 @@ def check_container_size(n: int, *, label: str = "elements") -> int:
         # Wording matches the Java reference's "excessive capacity requested".
         raise EvalError(f"excessive capacity requested: {n} {label}")
     return n
+
+
+def check_int_bits(bits: int, *, label: str = "integer") -> None:
+    """Reject an integer result whose magnitude exceeds `MAX_INT_BITS`.
+
+    Called *before* computing a result whose size is known a priori, at the
+    construction sites that can grow an int past the cap (multiply, left
+    shift, add/subtract, `int()`, integer literals). Operations that cannot
+    exceed the larger operand (`//`, `%`, `>>`, `&`, `|`, `^`, `abs`, unary
+    `-`/`+`/`~`) preserve the invariant for free and are not checked.
+    """
+    if bits > MAX_INT_BITS:
+        raise EvalError(f"{label} too large: {bits} bits exceeds limit of {MAX_INT_BITS}")
 
 
 def check_repeat(factor: int, length: int, *, unit: str = "elements") -> None:
@@ -83,11 +107,16 @@ ALLOC_TUPLE_ELEM = 8
 ALLOC_DICT_ENTRY = 56
 ALLOC_SET_ENTRY = 56
 
-# Strings and ints have variable per-byte overhead; we charge a small
-# fixed amount per character. Numbers/bools/None are not charged
-# (interned or near-zero per-instance cost).
+# Strings have variable per-byte overhead; we charge a small fixed amount
+# per character.
 ALLOC_STRING_BASE = 48
 ALLOC_STRING_PER_CHAR = 1
+
+# Large ints are charged linearly by bit-length so a sequence of small
+# growing operations (each well under MAX_INT_BITS) still accumulates against
+# the heap counter. ~30 bits per 4-byte CPython limb, charged as bits // 8.
+# bool/None/float remain uncharged (interned or near-zero per-instance cost).
+ALLOC_INT_BASE = 24  # small-int header/overhead
 
 
 def list_alloc(n: int) -> int:
@@ -110,9 +139,14 @@ def string_alloc(n: int) -> int:
     return ALLOC_STRING_BASE + ALLOC_STRING_PER_CHAR * n
 
 
+def int_alloc(bits: int) -> int:
+    return ALLOC_INT_BASE + (bits // 8)
+
+
 __all__ = [
     "ALLOC_DICT_BASE",
     "ALLOC_DICT_ENTRY",
+    "ALLOC_INT_BASE",
     "ALLOC_LIST_BASE",
     "ALLOC_LIST_ELEM",
     "ALLOC_RANGE",
@@ -123,9 +157,12 @@ __all__ = [
     "ALLOC_TUPLE_BASE",
     "ALLOC_TUPLE_ELEM",
     "MAX_CONTAINER_ELEMENTS",
+    "MAX_INT_BITS",
     "check_container_size",
+    "check_int_bits",
     "check_repeat",
     "dict_alloc",
+    "int_alloc",
     "list_alloc",
     "set_alloc",
     "string_alloc",

@@ -27,7 +27,9 @@ from .errors import AllocLimitExceeded, EvalError, StepLimitExceeded
 from .function import StarlarkFunction, bind_arguments
 from .limits import (
     check_container_size,
+    check_int_bits,
     check_repeat,
+    int_alloc,
     string_alloc,
     tuple_alloc,
 )
@@ -458,6 +460,9 @@ def _eval_expr(expr, frame: Frame, thread: Thread) -> Any:
 
 def _eval_expr_inner(expr, frame: Frame, thread: Thread) -> Any:
     if isinstance(expr, ast.IntLiteral):
+        # Enforce the magnitude cap at the literal too, so a multi-megabyte
+        # source literal (e.g. a huge hex constant) is rejected up front.
+        check_int_bits(expr.value.bit_length())
         return expr.value
     if isinstance(expr, ast.FloatLiteral):
         return expr.value
@@ -622,22 +627,28 @@ def _binop(op: TokenKind, a: Any, b: Any) -> Any:
 
 
 def _unop(op: TokenKind, x: Any) -> Any:
+    # Unary -, +, ~ can't exceed the operand's width, so none need
+    # check_int_bits; int results are still charged.
     if op == TokenKind.MINUS:
         if isinstance(x, bool):
             raise EvalError(f"unsupported unary operation: -{starlark_type(x)}")
-        if isinstance(x, (int, float)):
+        if _is_int(x):
+            return _charge_int(-x)
+        if isinstance(x, float):
             return -x
         raise EvalError(f"unsupported unary operator: -{starlark_type(x)}")
     if op == TokenKind.PLUS:
         if isinstance(x, bool):
             raise EvalError(f"unsupported unary operation: +{starlark_type(x)}")
-        if isinstance(x, (int, float)):
+        if _is_int(x):
+            return _charge_int(+x)
+        if isinstance(x, float):
             return +x
         raise EvalError(f"unsupported unary operator: +{starlark_type(x)}")
     if op == TokenKind.TILDE:
         if isinstance(x, bool) or not isinstance(x, int):
             raise EvalError(f"unsupported unary operation: ~{starlark_type(x)}")
-        return ~x
+        return _charge_int(~x)
     if op == TokenKind.NOT:
         return not truth(x)
     raise EvalError(f"unsupported unary operation: {op}")
@@ -663,6 +674,10 @@ def _safe_num_op(op, a, b):
 
 
 def _plus(a: Any, b: Any) -> Any:
+    if _is_int(a) and _is_int(b):
+        # Sum is at most one bit wider than the larger operand.
+        check_int_bits(max(a.bit_length(), b.bit_length()) + 1)
+        return _charge_int(a + b)
     if _is_num(a) and _is_num(b):
         return _safe_num_op(lambda x, y: x + y, a, b)
     if isinstance(a, str) and isinstance(b, str):
@@ -693,7 +708,23 @@ def _charge_thread_alloc(n: int) -> None:
         thread.add_allocs(n)
 
 
+def _charge_int(r: int) -> int:
+    """Charge an int result against the heap counter, linear in its bit-length.
+
+    This is the memory half of the integer-magnitude defence; the pre-op
+    `check_int_bits` calls are the CPU half. Charging is post-op, which is
+    correct for a cumulative memory counter — the size cap, not the charge,
+    provides the per-op guarantee. bool/None/float are left uncharged.
+    """
+    _charge_thread_alloc(int_alloc(r.bit_length()))
+    return r
+
+
 def _minus(a: Any, b: Any) -> Any:
+    if _is_int(a) and _is_int(b):
+        # Difference is at most one bit wider than the larger operand.
+        check_int_bits(max(a.bit_length(), b.bit_length()) + 1)
+        return _charge_int(a - b)
     if _is_num(a) and _is_num(b):
         return _safe_num_op(lambda x, y: x - y, a, b)
     if isinstance(a, StarlarkSet) and isinstance(b, StarlarkSet):
@@ -706,6 +737,11 @@ def _minus(a: Any, b: Any) -> Any:
 
 
 def _multiply(a: Any, b: Any) -> Any:
+    if _is_int(a) and _is_int(b):
+        # Product's width is at most the sum of the operands' widths. Checked
+        # before the multiply, so a cap-sized squaring never actually runs.
+        check_int_bits(a.bit_length() + b.bit_length())
+        return _charge_int(a * b)
     if _is_num(a) and _is_num(b):
         return _safe_num_op(lambda x, y: x * y, a, b)
     if _is_int(a) and isinstance(b, str):
@@ -763,9 +799,12 @@ def _floordiv(a: Any, b: Any) -> Any:
             # 1/inf -> 0.0; 1/-inf -> -0.0; sign follows a*sign(b).
             return 0.0 if (a > 0) == (b > 0) else -0.0
         try:
-            return a // b
+            r = a // b
         except OverflowError:
             raise EvalError("int too large to convert to float") from None
+        # `//` can't exceed the larger operand, so no check_int_bits; just
+        # charge the int result (float results are left uncharged).
+        return _charge_int(r) if _is_int(r) else r
     raise EvalError(f"unsupported binary operation: {starlark_type(a)} // {starlark_type(b)}")
 
 
@@ -774,7 +813,9 @@ def _mod(a: Any, b: Any) -> Any:
         if b == 0:
             kind = "floating-point" if isinstance(a, float) or isinstance(b, float) else "integer"
             raise EvalError(f"{kind} modulo by zero")
-        return _safe_num_op(lambda x, y: x % y, a, b)
+        # `%` can't exceed the larger operand, so no check_int_bits.
+        r = _safe_num_op(lambda x, y: x % y, a, b)
+        return _charge_int(r) if _is_int(r) else r
     if isinstance(a, str):
         return _str_format(a, b)
     raise EvalError(f"unsupported binary operation: {starlark_type(a)} %% {starlark_type(b)}")
@@ -782,12 +823,14 @@ def _mod(a: Any, b: Any) -> Any:
 
 def _bitwise(op: TokenKind, a: Any, b: Any) -> Any:
     if _is_int(a) and _is_int(b):
+        # &, |, ^ can't exceed the larger operand, so no check_int_bits; the
+        # result is still charged against the heap counter.
         if op == TokenKind.AMPERSAND:
-            return a & b
+            return _charge_int(a & b)
         if op == TokenKind.PIPE:
-            return a | b
+            return _charge_int(a | b)
         if op == TokenKind.CARET:
-            return a ^ b
+            return _charge_int(a ^ b)
     if isinstance(a, Dict) and isinstance(b, Dict) and op == TokenKind.PIPE:
         # dict | dict: right-biased merge, like Python 3.9+.
         out = Dict(mutability=a.mutability)
@@ -844,7 +887,12 @@ def _shift_left(a: Any, b: Any) -> Any:
             raise EvalError(f"negative shift count: {b}")
         if b > _SHIFT_LIMIT:
             raise EvalError(f"shift count too large: {b}")
-        return a << b
+        # Result width is exactly a.bit_length() + b. Checking it here also
+        # bounds repeated shifts that _SHIFT_LIMIT alone can't catch: each
+        # individual shift count stays under 512, yet the accumulated value
+        # would otherwise grow without limit.
+        check_int_bits(a.bit_length() + b)
+        return _charge_int(a << b)
     raise EvalError(f"unsupported binary operation: {starlark_type(a)} << {starlark_type(b)}")
 
 
@@ -852,8 +900,9 @@ def _shift_right(a: Any, b: Any) -> Any:
     if _is_int(a) and _is_int(b):
         if b < 0:
             raise EvalError(f"negative shift count: {b}")
-        # Right shift can never blow up memory; cap left shift only.
-        return a >> b
+        # Right shift can only shrink the value, so the invariant holds for
+        # free — no check_int_bits needed; just charge the (smaller) result.
+        return _charge_int(a >> b)
     raise EvalError(f"unsupported binary operation: {starlark_type(a)} >> {starlark_type(b)}")
 
 

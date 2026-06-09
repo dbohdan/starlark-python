@@ -229,3 +229,20 @@ d.setdefault('b', 3)
 """
     m = starlark.exec_file(src)
     assert len(m.globals["d"]) == 2
+
+
+def test_large_int_arithmetic_is_charged():
+    """Large-int results charge the heap counter linearly by bit-length;
+    bool/None/float stay uncharged."""
+    # Build the ints via shift loops (each shift count stays under the limit).
+    _, t_small = _run("x = 1\nfor i in range(2):\n    x = x << 500\n")
+    _, t_big = _run("x = 1\nfor i in range(200):\n    x = x << 500\n")
+    # The big int (~100k bits) charges far more than the small one (~1k bits).
+    assert t_big.allocs > t_small.allocs * 50
+
+
+def test_int_arithmetic_respects_max_allocs():
+    # A growing shift accumulates int charges; a tight budget aborts it.
+    src = "x = 1\nfor i in range(1000):\n    x = x << 500\n"
+    with pytest.raises(AllocLimitExceeded):
+        starlark.exec_file(src, max_allocs=50_000)

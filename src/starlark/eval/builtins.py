@@ -12,7 +12,7 @@ from contextvars import ContextVar
 from typing import Any
 
 from .errors import EvalError
-from .limits import MAX_CONTAINER_ELEMENTS, check_container_size
+from .limits import MAX_CONTAINER_ELEMENTS, check_container_size, check_int_bits
 from .mutability import Mutability
 from .values import (
     BuiltinFunction,
@@ -209,7 +209,11 @@ def b_int(x: Any, base: Any = None) -> int:
             raise EvalError("can't convert float +inf to int")
         if x == float("-inf"):
             raise EvalError("can't convert float -inf to int")
-        return int(x)
+        result = int(x)
+        # A finite float is at most ~1024 bits, well under the cap; check
+        # anyway so every string/float -> int path enforces the invariant.
+        check_int_bits(result.bit_length())
+        return result
     if isinstance(x, str):
         # Default: base 10. Pass explicit base=0 to auto-detect from prefix.
         return _int_from_string(x, 10)
@@ -256,9 +260,13 @@ def _int_from_string(text: str, base: int) -> int:
     if not body:
         raise EvalError(f'invalid base-{base} literal: "{text}"')
     try:
-        return int(sign + body, base)
+        result = int(sign + body, base)
     except ValueError:
         raise EvalError(f'invalid base-{base} literal: "{text}"') from None
+    # A non-decimal string (hex/oct/bin) isn't digit-capped by CPython, so it
+    # can parse to an arbitrarily large int; enforce the magnitude cap.
+    check_int_bits(result.bit_length())
+    return result
 
 
 def b_float(x: Any = 0.0) -> float:
