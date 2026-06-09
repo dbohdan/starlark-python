@@ -16,6 +16,7 @@ error (bad type, division by zero, frozen mutation, etc.).
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable, Mapping
 from typing import Any, TypeGuard
 
@@ -1061,25 +1062,29 @@ def _eval_call(expr: ast.CallExpression, frame: Frame, thread: Thread) -> Any:
     return call(fn, positional, keyword, thread, position=_pos(expr.start, thread))
 
 
-def _is_arg_binding_error(e: TypeError) -> bool:
-    """True if `e` is CPython's argument-binding TypeError, not an internal one.
+def _is_arg_binding_error(impl: Any, positional: list, keyword: dict) -> bool:
+    """True if `(positional, keyword)` don't fit `impl`'s signature.
 
-    A binding failure (wrong arity, unexpected keyword, ...) is raised before
-    the builtin's body executes, so the deepest frame in its traceback is one
-    of our two dispatch-plumbing frames: the `call` site here, or the
-    receiver-binding wrapper in `methods._bind`. A TypeError raised from inside
-    a builtin's body leaves that body's frame as the deepest one, so we leave
-    it for the catch-all instead of mislabeling it as an argument error.
+    Classifies a TypeError from a builtin call without inspecting Python stack
+    frames: we ask `inspect.signature(impl)` directly whether the arguments
+    bind. This is robust to however the builtin is wrapped — method receivers
+    are bound with `functools.partial`, whose signature correctly drops the
+    receiver — so adding or removing a wrapper layer can never silently
+    misclassify a binding error as an internal fault or vice versa.
+
+    If the signature can't be introspected (an exotic C callable a host may
+    have registered), we can't tell, so we report False and let the TypeError
+    flow to the catch-all rather than fabricate an argument-error message.
     """
-    tb = e.__traceback__
-    if tb is None:
+    try:
+        sig = inspect.signature(impl)
+    except (ValueError, TypeError):
         return False
-    while tb.tb_next is not None:
-        tb = tb.tb_next
-    from . import methods
-
-    code = tb.tb_frame.f_code
-    return code is call.__code__ or code is methods.WRAPPER_CODE
+    try:
+        sig.bind(*positional, **keyword)
+    except TypeError:
+        return True
+    return False
 
 
 def _wrap_unexpected_builtin_error(
@@ -1122,7 +1127,7 @@ def call(
             # raised from inside the builtin's body (e.g. an internal
             # `None + 1`) would mask a real fault if relabeled as an argument
             # error, so send those to the catch-all instead.
-            if not _is_arg_binding_error(e):
+            if not _is_arg_binding_error(fn.impl, positional, keyword):
                 raise _wrap_unexpected_builtin_error(e, fn.name, position) from e
             # Translate the binding error into something closer to the Java
             # reference's wording. The raw message looks like

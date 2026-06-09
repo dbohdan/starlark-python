@@ -353,3 +353,24 @@ def test_arg_binding_typeerror_still_rewritten():
         run("takes_none(1, 2, 3)\n", takes_none=fn)
     assert "takes_none()" not in exc.value.message
     assert "TypeError" not in exc.value.message
+
+
+def test_arg_binding_detection_robust_through_partial_wrapper():
+    # Method receivers are bound with functools.partial; classification must
+    # work through that wrapper. An internal TypeError (right arity, faulty
+    # body) must not be mislabeled, and a real arity mismatch must be.
+    import functools
+
+    from starlark.eval import BuiltinFunction
+
+    def method(receiver, key):
+        return None + 1  # internal TypeError when called with correct arity
+
+    fn = BuiltinFunction(name="m", impl=functools.partial(method, "recv"))
+
+    with pytest.raises(EvalError, match="unsupported operand"):
+        run("m('k')\n", m=fn)  # correct arity -> internal fault, kept faithful
+
+    with pytest.raises(EvalError) as exc:
+        run("m('k', 'extra')\n", m=fn)  # wrong arity -> arg-binding error
+    assert "unsupported operand" not in exc.value.message
