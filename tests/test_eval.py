@@ -291,3 +291,34 @@ def test_string_format_percent():
     assert expr("'x=%d, y=%s' % (3, 'hi')") == "x=3, y=hi"
     assert expr("'%s' % None") == "None"
     assert expr("'%r' % 'hi'") == '"hi"'
+
+
+# ----------------------------------------------------------- builtin dispatch safety net
+
+
+def test_builtin_nonevalerror_normalized_to_evalerror():
+    # A builtin that raises a non-EvalError, non-TypeError Python exception
+    # would otherwise escape raw and break the host contract `except EvalError`.
+    # The dispatch catch-all must normalize it.
+    from starlark.eval import BuiltinFunction
+
+    def boom():
+        raise ValueError("kaboom")
+
+    fn = BuiltinFunction(name="boom", impl=boom)
+    with pytest.raises(EvalError, match="kaboom"):
+        run("boom()\n", boom=fn)
+
+
+def test_builtin_resource_limit_not_masked():
+    # Limit exceptions subclass EvalError; the EvalError arm must let them
+    # through unchanged rather than the catch-all re-wrapping them.
+    from starlark.eval import BuiltinFunction
+    from starlark.eval.errors import StepLimitExceeded
+
+    def over_limit():
+        raise StepLimitExceeded("step limit exceeded")
+
+    fn = BuiltinFunction(name="over_limit", impl=over_limit)
+    with pytest.raises(StepLimitExceeded):
+        run("over_limit()\n", over_limit=fn)

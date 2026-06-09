@@ -1028,6 +1028,9 @@ def call(
         try:
             return fn.impl(*positional, **keyword)
         except EvalError as e:
+            # ResourceLimitExceeded/StepLimitExceeded/AllocLimitExceeded all
+            # subclass EvalError, so this arm preserves them unchanged — they
+            # must reach the host as the limit signal they are.
             e.push_frame(fn.name, position)
             raise
         except TypeError as e:
@@ -1040,6 +1043,24 @@ def call(
                 msg = msg.split("() ", 1)[1]
             msg = msg.replace("'", "")
             raise EvalError(msg) from None
+        except MemoryError:
+            # A genuine host out-of-memory condition, not a Starlark semantic
+            # error. The in-band resource limits (step/alloc counters, the
+            # container and integer caps) are what bound Starlark-induced
+            # growth; a MemoryError that slips past them means the host itself
+            # is exhausted. Let it propagate so the host sees the real
+            # condition rather than a disguised EvalError it might retry.
+            raise
+        except Exception as e:
+            # Safety net for unknown-unknowns: any other Python exception a
+            # builtin raises (ValueError, KeyError, RecursionError, ...) would
+            # otherwise escape raw and break the documented `except EvalError`
+            # host contract. Normalize it. Specific normalizations elsewhere
+            # (chr range, oversized-int stringification) still run first, so
+            # this only catches what nothing else anticipated.
+            err = EvalError(f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
+            err.push_frame(fn.name, position)
+            raise err from e
     if isinstance(fn, StarlarkFunction):
         # Recursion check: based on the *syntactic* identity of the def/lambda
         # AST node, not the StarlarkFunction value, so two closures created
