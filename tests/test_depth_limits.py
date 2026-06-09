@@ -62,3 +62,34 @@ def test_assert_fails_with_depth_cap_in_predeclared_context():
         "freeze(x)\n"  # uses _CURRENT_MUTABILITY; sanity that path runs
     )
     starlark.exec_file(src, predeclared=make_predeclared())
+
+
+def test_deep_equality_rejected_at_value_level():
+    # `x == x` for a runtime-built deep value recurses through equal();
+    # without a value-level depth bound this leaks a RecursionError.
+    src = "x = []\nfor i in range(400):\n    x = [x]\ny = x == x\n"
+    with pytest.raises(EvalError, match="too deeply nested"):
+        starlark.exec_file(src)
+
+
+def test_deep_membership_rejected_at_value_level():
+    # `x in [x]` drives _contains() -> equal() into the same deep recursion.
+    src = "x = []\nfor i in range(400):\n    x = [x]\ny = x in [x]\n"
+    with pytest.raises(EvalError, match="too deeply nested"):
+        starlark.exec_file(src)
+
+
+def test_deep_ordering_rejected_at_value_level():
+    # sorted() compares with less_than(); a deep list trips the bound too.
+    src = "x = []\nfor i in range(400):\n    x = [x]\ny = sorted([x, x])\n"
+    with pytest.raises(EvalError, match="too deeply nested"):
+        starlark.exec_file(src)
+
+
+def test_shallow_equality_still_works():
+    # Well below the cap: equality and membership behave normally.
+    m = starlark.exec_file(
+        "a = [1, [2, [3]]]\nb = [1, [2, [3]]]\neq = a == b\ninn = a in [b]\n"
+    )
+    assert m.globals["eq"] is True
+    assert m.globals["inn"] is True

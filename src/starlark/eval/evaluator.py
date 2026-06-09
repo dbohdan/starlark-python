@@ -857,7 +857,7 @@ def _shift_right(a: Any, b: Any) -> Any:
     raise EvalError(f"unsupported binary operation: {starlark_type(a)} >> {starlark_type(b)}")
 
 
-def _contains(container: Any, item: Any) -> bool:
+def _contains(container: Any, item: Any, _depth: int = 0) -> bool:
     if isinstance(container, str):
         if not isinstance(item, str):
             raise EvalError(
@@ -865,7 +865,10 @@ def _contains(container: Any, item: Any) -> bool:
             )
         return item in container
     if isinstance(container, (StarlarkList, tuple)):
-        return any(equal(x, item) for x in container)
+        # Looking inside the container is one structural level; pass _depth so a
+        # deeply nested item (`x in [x]`) trips MAX_NESTING_DEPTH in equal()
+        # instead of leaking a RecursionError.
+        return any(equal(x, item, _depth + 1) for x in container)
     if isinstance(container, Dict):
         return item in container
     if isinstance(container, StarlarkSet):

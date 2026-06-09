@@ -35,6 +35,7 @@ from .limits import (
     ALLOC_LIST_ELEM,
     ALLOC_RANGE,
     ALLOC_SET_ENTRY,
+    MAX_NESTING_DEPTH,
     dict_alloc,
     list_alloc,
     set_alloc,
@@ -581,7 +582,53 @@ def check_hashable(value: Any) -> None:
 _EQUAL_SEEN: list[set] = []
 
 
-def equal(a: Any, b: Any) -> bool:
+def _check_compare_depth(_depth: int) -> None:
+    """Bound structural recursion in value comparison.
+
+    `MAX_NESTING_DEPTH` is enforced statically (parser, evaluator AST walk,
+    `repr_starlark`, ...), but a value can be built deep at runtime
+    (`x = []` then `for i in range(N): x = [x]`). Comparing such a value
+    (`x == x`, `x in [x]`, `sorted([x, x])`) would otherwise recurse into
+    Python's call stack and leak a `RecursionError`. The cycle-detection
+    set handles cyclic references; this catches the linear-deep case.
+    """
+    if _depth > MAX_NESTING_DEPTH:
+        raise EvalError(f"value too deeply nested to compare (>{MAX_NESTING_DEPTH} levels)")
+
+
+def _equal_containers(a: Any, b: Any, _depth: int) -> bool:
+    """Element-wise equality for two Starlark containers, depth-threaded.
+
+    Mirrors the per-type `__eq__` bodies but recurses through `equal` so the
+    depth bound propagates. Uses explicit loops (no generator expressions) to
+    keep the per-level Python frame count low, so the EvalError raised at the
+    cap can unwind before CPython's own recursion limit is hit. Set elements
+    are hashable scalars (never nested containers), so set equality can defer
+    to the cheap key comparison.
+    """
+    if isinstance(a, StarlarkList) and isinstance(b, StarlarkList):
+        if len(a) != len(b):
+            return False
+        for x, y in zip(a._data, b._data, strict=True):
+            if not equal(x, y, _depth):
+                return False
+        return True
+    if isinstance(a, Dict) and isinstance(b, Dict):
+        if len(a) != len(b):
+            return False
+        for k, v in a._data.items():
+            if k not in b._data:
+                return False
+            if not equal(v, b._data[k], _depth):
+                return False
+        return True
+    if isinstance(a, StarlarkSet) and isinstance(b, StarlarkSet):
+        return a._data.keys() == b._data.keys()
+    # Mismatched container types (e.g. list vs dict) are never equal.
+    return False
+
+
+def equal(a: Any, b: Any, _depth: int = 0) -> bool:
     """Starlark equality. Same-type structural; cross-numeric (int <-> float).
 
     Distinct types compare unequal. The bool/int special case follows the
@@ -590,7 +637,9 @@ def equal(a: Any, b: Any) -> bool:
 
     Cycles between mutable values are handled by recording each pair we're
     currently comparing; a recurrence is treated as equal at that level.
+    `_depth` additionally bounds linear-deep (non-cyclic) structures.
     """
+    _check_compare_depth(_depth)
     if isinstance(a, (StarlarkList, Dict, StarlarkSet)) and isinstance(
         b, (StarlarkList, Dict, StarlarkSet)
     ):
@@ -602,13 +651,20 @@ def equal(a: Any, b: Any) -> bool:
             return True
         seen.add(pair)
         try:
-            return a == b
+            return _equal_containers(a, b, _depth + 1)
         finally:
             seen.discard(pair)
     if type(a) is type(b):
         # NaN compares equal to itself in Starlark (identity-based equality
         # for floats), unlike Python's IEEE-754 default.
         if isinstance(a, float) and a != a and isinstance(b, float) and b != b:
+            return True
+        if isinstance(a, tuple):
+            if len(a) != len(b):
+                return False
+            for x, y in zip(a, b, strict=True):
+                if not equal(x, y, _depth + 1):
+                    return False
             return True
         return a == b
     # bool/int cross: spec says distinct — explicitly check before int/float.
@@ -619,11 +675,13 @@ def equal(a: Any, b: Any) -> bool:
     return False
 
 
-def less_than(a: Any, b: Any) -> bool:
+def less_than(a: Any, b: Any, _depth: int = 0) -> bool:
     """Starlark `<`. Same-type ordered; numeric int <-> float allowed.
 
     NaN sorts greater than every non-NaN value (matching Java's Double.compare).
+    `_depth` bounds structural recursion through nested lists/tuples.
     """
+    _check_compare_depth(_depth)
     if isinstance(a, bool) and isinstance(b, bool):
         return (not a) and b
     # Reject bool vs non-bool numeric per the spec.
@@ -644,13 +702,13 @@ def less_than(a: Any, b: Any) -> bool:
         return a < b
     if isinstance(a, tuple) and isinstance(b, tuple):
         for x, y in zip(a, b, strict=False):
-            if not equal(x, y):
-                return less_than(x, y)
+            if not equal(x, y, _depth + 1):
+                return less_than(x, y, _depth + 1)
         return len(a) < len(b)
     if isinstance(a, StarlarkList) and isinstance(b, StarlarkList):
         for x, y in zip(a, b, strict=False):
-            if not equal(x, y):
-                return less_than(x, y)
+            if not equal(x, y, _depth + 1):
+                return less_than(x, y, _depth + 1)
         return len(a) < len(b)
     # Preserve operand order so `min(string, int)` differs from
     # `min(int, string)` in the error message; the spec uses `<=>` to indicate
