@@ -2,9 +2,19 @@
 name = "starlark"
 version = "0.5.0"
 description = "Pure-Python implementation of the Starlark configuration language."
-readme = "README.md"
 requires-python = ">=3.11"
-license = { file = "LICENSE" }
+authors = [
+  { name = "The Bazel Authors" },
+  { name = "D. Bohdan", email = "dbohdan@dbohdan.com" },
+]
+maintainers = [
+  { name = "D. Bohdan", email = "dbohdan@dbohdan.com" },
+]
+readme = "README.md"
+license = "Apache-2.0"
+license-files = [
+  "LICENSE",
+]
 keywords = [
   "configuration",
   "configuration-language",
@@ -16,7 +26,7 @@ keywords = [
   "starlark",
 ]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: Apache Software License",
