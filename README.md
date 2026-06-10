@@ -138,7 +138,7 @@ Install [Poe the Poet](https://poethepoet.natn.io/) to run the tasks (`uv tool i
 
 ```sh
 uv sync           # Install deps
-poe test          # ~580 tests, ~3s
+poe test          # ~600 tests, ~3s
 poe lint          # Ruff
 poe typecheck     # Pyright
 poe zipapp        # Build ./starlark-python.pyz
