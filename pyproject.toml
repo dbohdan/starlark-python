@@ -1,6 +1,6 @@
 [project]
 name = "starlark"
-version = "0.5.0"
+version = "0.6.0"
 description = "Pure-Python implementation of the Starlark configuration language."
 requires-python = ">=3.11"
 authors = [
