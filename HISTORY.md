@@ -177,6 +177,35 @@ matching exit status and stdout. Skip cleanly if absent.
 
 Append-only. Newest entries on top.
 
+### 2026-06-11 — FileLoader path-traversal containment
+
+Fixed path traversal in `eval/loader.py:FileLoader`. The old
+`Path(base) / name` let an absolute or `..`-laden load name escape every
+`search_paths` base — `load("/etc/hostname", ...)` and
+`load("../secret/creds.star", ...)` both read outside the search dir, and
+parse/eval errors leaked the file content back to the caller. `__call__`
+now rejects absolute / `..` names up front (POSIX and Windows forms) and,
+for each base, resolves the candidate and accepts it only when the real
+path is contained in the resolved base — so escaping symlinks are caught
+too. Rejection messages never echo the resolved path or file content; a
+contained-but-absent name still reports "file not found". The
+`Loader` protocol, constructor signature, cache behavior, and legitimate
+relative loads are unchanged.
+
+Documented the guarantee: new security-properties list in the `FileLoader`
+docstring, a revised `FileLoader` paragraph in
+`security/threat-model.md` (containment guarantee plus the two residual
+caveats — executes file content, may leak existence of contained files),
+and a trust-boundary note in `README.md` / `docs/README.md`.
+
+Tests: new `tests/test_loader.py` covers a legitimate relative load, the
+`../` and absolute-path rejections, an escaping-symlink rejection, the
+contained-but-missing "file not found" path, and that the rejection
+message leaks neither the absolute path nor file content.
+
+What's next: nothing blocking. The "file not found" vs "outside" message
+split is a deliberate, documented existence-oracle trade-off.
+
 ### 2026-06-09 — Hardening follow-up (review feedback)
 
 Addressed three robustness gaps found while reviewing the hardening work

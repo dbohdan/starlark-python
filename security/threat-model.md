@@ -36,7 +36,18 @@ perform malicious *actions* against the host process:
   globs, or stats files. The only filesystem-touching code in the
   package is `eval/loader.py:FileLoader`, which is a host-supplied
   helper; it is **never** active unless the host explicitly
-  instantiates and passes it.
+  instantiates and passes it. When the host does use it, `search_paths`
+  is a real trust boundary: a load name is resolved against each base
+  directory and accepted only when its resolved real path lies inside
+  that base, so absolute names, `..` traversal, and symlinks that point
+  outside a search path are all rejected. Two residual caveats remain.
+  First, containment bounds *which* files load — a loaded file's content
+  is still executed as Starlark, so the host must populate `search_paths`
+  with trusted files only. Second, a host that surfaces loader exceptions
+  to untrusted callers can still leak the *existence* of a contained file
+  (the "file not found" message distinguishes a missing in-tree name from
+  a rejected escaping one); rejection messages never echo the resolved
+  path or file content.
 - **No network access.** No builtin opens sockets, performs HTTP
   requests, or resolves hostnames.
 - **No subprocess execution.** No builtin invokes `os.system`,

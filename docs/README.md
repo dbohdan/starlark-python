@@ -378,7 +378,11 @@ loader = FileLoader(exec_file=starlark.exec_file, search_paths=[".", "lib"])
 starlark.exec_file(open("main.star").read(), loader=loader)
 ```
 
-`FileLoader` caches modules by path and freezes them on first load.
+`FileLoader` caches modules by requested name and freezes them on first
+load. `search_paths` is a trust boundary: loads are contained to those
+directories — absolute names, `..` traversal, and symlink escapes are
+rejected via resolved-path containment — but every file inside a search
+path is executed as Starlark, so list only directories of trusted files.
 
 ## Test-driver helpers
 

@@ -89,6 +89,9 @@ starlark.exec_file(open("main.star").read(), loader=loader)
 ```
 
 `load("foo.star", "bar")` then resolves `foo.star` against `loader`.
+`FileLoader` only allows loading files from the directories in `search_paths`;
+it rejects absolute paths, `..` traversal, and symlink escapes.
+List just those directories that you want Starlark code to access.
 
 ## Security
 
@@ -138,7 +141,7 @@ Install [Poe the Poet](https://poethepoet.natn.io/) to run the tasks (`uv tool i
 
 ```sh
 uv sync           # Install deps
-poe test          # ~600 tests, ~3s
+poe test          # ~610 tests, ~3s
 poe lint          # Ruff
 poe typecheck     # Pyright
 poe zipapp        # Build ./starlark-python.pyz
